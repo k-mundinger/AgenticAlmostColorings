@@ -26,7 +26,7 @@ defaults = dict(
     # Problem definition
     problem_name='HadwigerNelson',
     dim=2,
-    n_colours=6,
+    n_colours=7,
 
     # Optimizer definition
     optimizer=dict(
@@ -38,15 +38,13 @@ defaults = dict(
     # Training definition
     training=dict(
         # General
-        n_steps=5000,  # total number of parameter updates
+        n_steps=20000,  # total number of parameter updates
         batch_size=2048,  # Batch size for training
         tile_grid=False,  # Whether to tile the grid or not
         grid_input_scale=1,  # Scale of the grid as how it is input to the network
         loss_fn="log_prob",
-        # Sampling specifics: Hadwiger-Nelson
         grid_sizes=(6,6),  # Must be a tuple with the grid sizes for each dimension (var dim)
         p_norm=2,  # The norm that induces the distance w.r.t which we sample "unit distance" points
-        sample_all_colours=True,  # If True, samples all colours in each batch, else samples only one colour
         n_circle_points=8, # number of proximity points to sample for each colour
         temperature=5.0, # temperature for weighting the circle points, -1 means infty, i.e. hard selecting the max
         good_coloring=True,  # for lagrangian term for last colour
@@ -73,10 +71,6 @@ defaults = dict(
         log_metrics_every_k_steps=1000,  # how often to log metrics
         log_imgs_every_k_steps=500,  # how often to log images
         log_model_every_k_steps=100000,  # how often to log the model
-        eval_distances = [[1.0, 1.0, 1.0, 1.0, 1.0, 0.5],
-                          [1.0, 1.0, 1.0, 1.0, 1.0, 0.4],
-                          [1.0, 1.0, 1.0, 1.0, 1.0, 0.6]
-                          ] 
     ),
 
     kill_criterion=dict(

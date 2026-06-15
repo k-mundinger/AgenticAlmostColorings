@@ -9,7 +9,6 @@ import sys
 import time
 from typing import Any
 
-import numpy as np
 import torch
 import wandb
 from torch.optim import SGD, Adam, AdamW
@@ -44,15 +43,8 @@ class Runner:
         self.seed = None
         self.tmp_dir = tmp_dir      
         self.metrics = {mode: {'loss': MeanMetric().to(device=self.device)} for mode in ['train', 'val', 'test']}
-        self.run_terminator = RunTerminator(**config.kill_criterion)   
-        if isinstance(self.config.training['batch_size'], int):
-            self.effective_batch_size = self.config.training['batch_size']
-            if self.config.training['sample_all_colours']:
-                self.effective_batch_size *= self.config['n_colours']
-        elif isinstance(self.config.training['batch_size'], list):
-            na, nc, nd, np = self.config.training['batch_size']
-            nc = self.config['n_colours'] if nc == 'all' else nc
-            self.effective_batch_size = (na if isinstance(na, int) else na[0]) * (nc if isinstance(nc, int) else nc[1]) * (nd if isinstance(nd, int) else nd[2]) * (np if isinstance(np, int) else np[3])
+        self.run_terminator = RunTerminator(**config.kill_criterion)
+        self.effective_batch_size = self.config.training['batch_size']
 
         # Variables to be set
         self.problem = None
@@ -188,7 +180,7 @@ class Runner:
         """
         Main training loop in the parametric setting, i.e. where we sample from predefined intervals and update.
         """
-        self.problem_metrics = self.problem.get_metrics(list_of_distances=self.config.metrics['eval_distances'])
+        self.problem_metrics = self.problem.get_metrics()
         self.log(); self.reset_averaged_metrics()
 
         # log the initial colouring
@@ -241,7 +233,7 @@ class Runner:
                 else:
                     self.problem.log_plots(save_path=self.tmp_dir)
             if should_log_by_type['metrics']:
-                self.problem_metrics = self.problem.get_metrics(list_of_distances=self.config.metrics['eval_distances'])
+                self.problem_metrics = self.problem.get_metrics()
                 self.log()
                 if self.config["training"]["parallelogram"]:
                     #parallelogram = torch.tensor(self.config["training"]["parallelogram"]).to(self.device)
@@ -266,15 +258,7 @@ class Runner:
                 GeneralUtility.save_model(model=self.problem.model, model_identifier=f'step_{step}', tmp_dir=self.tmp_dir, sync=True)
 
         if self.problem.dim == 3:
-            # This is a hack, sorry. But it was unreasonably complicated to properly 
-            # implement a different (finer) evaluation at the end of the run.
-
-            if self.config.model["name"] == "HexagonalVoronoi":
-                print("z_dist", self.problem.model.base_model.z_dist)
-                print("hex_size", self.problem.model.base_model.hex_size)
-                print("z_offsets", self.problem.model.base_model.z_offsets)
-
-            fine_eval = self.problem.get_fine_eval(gridsize = 200, n_circle_points = 1024)
+            fine_eval = self.problem.get_fine_eval(gridsize=200, n_circle_points=1024)
             wandb.log({"fine_eval": fine_eval}, commit=True)
         
         if self.config["training"]["parallelogram"] is not None:
@@ -293,69 +277,6 @@ class Runner:
                         for j in range(parallelogram.shape[1]):
                             wandb.log({f"parallelogram_{i}_{j}": parallelogram[i][j].item()})
             wandb.log({"parallelogram_eval": parallelogram_eval}, commit=True)
-
-    def run_gradient_search(self):
-
-        final_distances_list = []
-        grid_colour_list = []
-        conflict_fraction_list = []
-        conflict_list = []
-        confidences_list = []
-        
-        for _ in range(self.config.gradient_search['num_iterations']):
-
-            gradient_search = GradientSearch(gridsize=self.config.gradient_search['gridsize'],
-                                                stepsize=self.config.gradient_search['stepsize'],
-                                                n_steps=self.config.gradient_search['n_steps'],
-                                                grid_bounds=self.config.training['grid_sizes'],
-                                                dim = self.config.dim,
-                                                p_norm = self.config.training['p_norm'],
-                                                circle_points=self.config.gradient_search['circle_points'],
-                                                optimizer_name=self.config.gradient_search['optimizer_name'],
-                                                colour_distances=self.config.training['colour_distances'],
-                                                sorted_colours=self.config.training['sort_distances'])
-            
-            gradient_search.run(model=self.problem.model)
-            found_distances = gradient_search.get_distances()
-
-            # Evaluate the found distances
-            grid_colours, conflicts_per_point, confidences = GeneralUtility.evaluate_on_grid(model=self.problem.model,
-                                                        grid_bounds=[b/2 for b in self.config.training['grid_sizes']],
-                                                        gridsize=self.config.metrics['plot_grid_size'],
-                                                        device=self.device,
-                                                        colour_distances=found_distances,
-                                                        n_circle_points=self.config.metrics['n_circle_points'],
-                                                        dim=self.config.dim,
-                                                        p_norm=self.config.training['p_norm'],
-                                                        concat_colours=True)
-            
-            fraction_conflicts = (conflicts_per_point > 0).sum() / self.config.metrics['plot_grid_size']**2
-            
-            final_distances_list.append(found_distances)
-            grid_colour_list.append(grid_colours)
-            conflict_list.append(conflicts_per_point.detach().cpu())
-            conflict_fraction_list.append(fraction_conflicts.item())
-            confidences_list.append(confidences.detach().cpu())
-
-        # find minimum conflict fraction
-        min_conflict_idx = np.argmin(conflict_fraction_list)
-        found_distances = final_distances_list[min_conflict_idx]
-        
-        save_path = os.path.join(self.tmp_dir, "best_plot.png")
-        
-        GeneralUtility.create_conflict_plot(grid_colours=grid_colour_list[min_conflict_idx],
-                                                conflicts_per_point=conflict_list[min_conflict_idx],
-                                                grid_confidences=confidences_list[min_conflict_idx],
-                                                grid_bounds=self.problem.grid_bounds,
-                                                gridsize=self.config.metrics['plot_grid_size'],
-                                                n_colours=self.problem.n_colours,
-                                                save_path=save_path)
-            
-        wandb.log({f"Best_colouring" + str(found_distances): wandb.Image(save_path)}, commit=False)
-
-        # also log the minimum conflict fraction
-        wandb.log({"best_fraction_points_with_conflict": conflict_fraction_list[min_conflict_idx]}, commit=True)
-
 
     def run(self):
         """Controls the execution of the script."""
@@ -377,8 +298,4 @@ class Runner:
 
         # Save the trained model and upload it to wandb
         GeneralUtility.save_model(model=self.problem.model, model_identifier='trained', tmp_dir=self.tmp_dir, sync=True)
-
-        # Search for the optimal distances
-        # if self.config.problem_name == 'PolychromaticNumber':
-        #     self.run_gradient_search()
 

@@ -154,12 +154,8 @@ class GeneralUtility:
         assert len(config.training['grid_sizes']) == config.dim, "Grid sizes must have the same length as the dimension."
         assert min(config.training['grid_sizes']) >= 1, "Grid sizes must be at least 1."
 
-        assert isinstance(config.training['batch_size'], (int, list)), "Batch size must be an integer or a list."  
+        assert isinstance(config.training['batch_size'], int), "Batch size must be an integer."
 
-        if not config.problem_name == 'HadwigerNelson': # in HadwigerNelson we only pass one distance
-            assert isinstance(config.training['colour_distances'], list) or isinstance(config.training['colour_distances'], tuple), "Colour distances must be an iterable."
-            assert len(config.training['colour_distances']) == config.n_colours, "Colour distances must have the same length as the number of colours."
-        
         assert config.kill_criterion["patience"] is None or \
                config.metrics["log_metrics_every_k_steps"] <= config.kill_criterion[
                    "patience"], "We need to log at least once before we can check if a run should be terminated."
