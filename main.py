@@ -26,7 +26,7 @@ defaults = dict(
     # Problem definition
     problem_name='HadwigerNelson',
     dim=2,
-    n_colours=7,
+    n_colours=6,
 
     # Optimizer definition
     optimizer=dict(
@@ -49,8 +49,8 @@ defaults = dict(
         temperature=5.0, # temperature for weighting the circle points, -1 means infty, i.e. hard selecting the max
         good_coloring=True,  # for lagrangian term for last colour
         good_coloring_weight=0.01,
-        parallelogram=[[3.0, 1.0], 
-                       [1.0, 3.0]],  # None or a list of vectors (they are the rows!)
+        parallelogram=[[2.0, 1.0], 
+                       [1.0, 2.0]],  # None or a list of vectors (they are the rows!)
         trainable_parallelogram=1
     ),
 

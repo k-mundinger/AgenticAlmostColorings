@@ -15,7 +15,7 @@ from torch.optim import SGD, Adam, AdamW
 from torchmetrics import MeanMetric
 from tqdm.auto import tqdm
 
-from utilities import SequentialSchedulers, GeneralUtility, RunTerminator
+from utilities import SequentialSchedulers, GeneralUtility
 
 
 class Runner:
@@ -42,8 +42,7 @@ class Runner:
         # Set a couple useful variables/functions/instances
         self.seed = None
         self.tmp_dir = tmp_dir      
-        self.metrics = {mode: {'loss': MeanMetric().to(device=self.device)} for mode in ['train', 'val', 'test']}
-        self.run_terminator = RunTerminator(**config.kill_criterion)
+        self.metrics = {'train': {'loss': MeanMetric().to(device=self.device)}}
         self.effective_batch_size = self.config.training['batch_size']
 
         # Variables to be set
@@ -167,9 +166,6 @@ class Runner:
         """
         loggingDict = self.get_metrics()
 
-        # Update the run_terminator
-        self.run_terminator.update({**loggingDict['train'], **loggingDict['problem_metrics']})
-
         # Log and push to Wandb
         for metric_type, val in loggingDict.items():
             wandb.run.summary[f"{metric_type}"] = val
@@ -182,11 +178,6 @@ class Runner:
         """
         self.problem_metrics = self.problem.get_metrics()
         self.log(); self.reset_averaged_metrics()
-
-        # log the initial colouring
-        # if self.problem.dim == 2:
-        #     self.problem.log_plots(save_path=self.tmp_dir)
-        
 
         for step in tqdm(range(1, self.config.training['n_steps'] + 1, 1)):
             if step % self.config.metrics['log_metrics_every_k_steps'] == 0:
@@ -217,9 +208,6 @@ class Runner:
             # Update the metrics
             self.metrics['train']['loss'](value=loss, weight=self.effective_batch_size)
 
-            # Check if run should be terminated
-            if self.run_terminator.check_termination_and_update(): break
-            
             is_last_step = step == self.config.training['n_steps']
             should_log_by_type = {log_type: is_last_step or (step % self.config.metrics[f'log_{log_type}_every_k_steps'] == 0) 
                           for log_type in ['imgs', 'metrics', 'model']}
@@ -257,10 +245,6 @@ class Runner:
             if should_log_by_type['model']:
                 GeneralUtility.save_model(model=self.problem.model, model_identifier=f'step_{step}', tmp_dir=self.tmp_dir, sync=True)
 
-        if self.problem.dim == 3:
-            fine_eval = self.problem.get_fine_eval(gridsize=200, n_circle_points=1024)
-            wandb.log({"fine_eval": fine_eval}, commit=True)
-        
         if self.config["training"]["parallelogram"] is not None:
             parallelogram = torch.linalg.inv(self.problem.model.inv_transf_matrix.detach())
             parallelogram_eval = GeneralUtility.get_parallelogram_eval(model=self.problem.model,

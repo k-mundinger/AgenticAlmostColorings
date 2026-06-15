@@ -45,42 +45,28 @@ class ProblemBaseClass(ABC):
         anchor_outputs, proximity_outputs = model_outputs['anchor_outputs'], model_outputs['proximity_outputs']
         return self.loss_fn(x=anchor_outputs, y=proximity_outputs)
 
-    def set_model(self, reinit: bool, model_path: Optional[str] = None):
-        sys.stdout.write(f"Loading model - reinit: {reinit} | path: {model_path if model_path else 'None specified'}.")
-        if reinit:
-            models_kwargs = {key: val for key, val in self.config.model.items()
-                              if key != 'name' and val not in [None, 'None', 'none']}
+    def set_model(self, reinit: bool = True):
+        sys.stdout.write("Loading model.\n")
+        assert reinit, "Only reinit=True is supported."
+        models_kwargs = {key: val for key, val in self.config.model.items()
+                         if key != 'name' and val not in [None, 'None', 'none']}
 
-            assert self.network_input_dim is not None, "Network input dimension not properly specified in inheriting class."
+        assert self.network_input_dim is not None, "Network input dimension not properly specified in inheriting class."
 
-            model = getattr(models, self.config.model['name'])(
-                input_dim=self.network_input_dim,
-                output_dim=self.n_colours,
-                num_colors=self.n_colours,
-                grid_bound=self.grid_bounds[0],
-                device=self.device,
-                **models_kwargs,
+        model = getattr(models, self.config.model['name'])(
+            input_dim=self.network_input_dim,
+            output_dim=self.n_colours,
+            **models_kwargs,
+        )
+
+        model = GeneralUtility.prepend_centering_scaling_to_module(
+            model=model, scaling=self.grid_input_scale, centering=0.,
+        )
+        if self.config["training"]["parallelogram"]:
+            parallelogram = torch.tensor(self.config["training"]["parallelogram"]).to(self.device)
+            model = GeneralUtility.prepend_parallelogram_transformation(
+                model=model, spanning_vectors=parallelogram,
             )
-
-            model = GeneralUtility.prepend_centering_scaling_to_module(
-                model=model, scaling=self.grid_input_scale, centering=0.,
-            )
-            if self.config["training"]["parallelogram"]:
-                parallelogram = torch.tensor(self.config["training"]["parallelogram"]).to(self.device)
-                model = GeneralUtility.prepend_parallelogram_transformation(
-                    model=model, spanning_vectors=parallelogram,
-                )
-        else:
-            model = self.model
-
-        if model_path is not None:
-            state_dict = torch.load(model_path, map_location=self.device)
-            new_state_dict = {}
-            for key, val in list(state_dict.items()):
-                if key.startswith('base_model.'):
-                    key = key.replace("base_model.", "")
-                new_state_dict[key] = val
-            model.load_state_dict(new_state_dict)
 
         model = model.to(device=self.device)
         self.model = model
@@ -176,7 +162,6 @@ class HadwigerNelson(ProblemBaseClass):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.colour_distances = [1. for _ in range(self.n_colours)]
         self.network_input_dim = self.dim
 
     def sample_points(self, n_samples: int) -> dict[str, torch.Tensor]:
@@ -207,29 +192,19 @@ class HadwigerNelson(ProblemBaseClass):
         return {"fraction_points_with_conflict": fraction_points_with_conflict}
 
     def evaluate_on_grid(self, gridsize: int, good_coloring: bool) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
-        if self.dim == 2:
-            return GeneralUtility.evaluate_on_grid(
-                model=self.model,
-                grid_bounds=self.grid_bounds,
-                gridsize=gridsize,
-                device=self.device,
-                colour_distances=self.colour_distances,
-                n_circle_points=self.config.metrics['n_circle_points'],
-                dim=self.dim,
-                p_norm=self.p_norm,
-                concat_colours=False,
-                good_coloring=good_coloring,
-                tile_grid=self.config["training"]["tile_grid"],
-            )
-
-        return *GeneralUtility.evaluate_3D_grid(
+        assert self.dim == 2, "Grid evaluation plots are only supported for 2D."
+        return GeneralUtility.evaluate_on_grid(
             model=self.model,
             grid_bounds=self.grid_bounds,
             gridsize=gridsize,
             device=self.device,
+            colour_distances=[1.] * self.n_colours,
             n_circle_points=self.config.metrics['n_circle_points'],
+            dim=self.dim,
+            p_norm=self.p_norm,
             good_coloring=good_coloring,
-        ), None
+            tile_grid=self.config["training"]["tile_grid"],
+        )
 
     def log_plots(self, save_path, parallelogram=None) -> None:
         save_path = os.path.join(save_path, "current_plot.png")
@@ -258,14 +233,3 @@ class HadwigerNelson(ProblemBaseClass):
             GeneralUtility.create_conflict_plot(**plot_kwargs)
 
         wandb.log({"Colouring": wandb.Image(save_path)}, commit=False)
-
-    def get_fine_eval(self, gridsize, n_circle_points):
-        _, conflicts_per_point = GeneralUtility.evaluate_3D_grid(
-            model=self.model,
-            grid_bounds=self.grid_bounds,
-            gridsize=gridsize,
-            device=self.device,
-            n_circle_points=n_circle_points,
-        )
-        conflicts_mask = conflicts_per_point > 0
-        return conflicts_mask.sum().item() / (gridsize**self.config["dim"])

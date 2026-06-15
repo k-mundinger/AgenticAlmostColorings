@@ -5,9 +5,7 @@
 # ===========================================================================
 from bisect import bisect_right
 import os
-import sys
 from typing import Optional, Tuple
-from math import floor, ceil
 
 import matplotlib.pyplot as plt
 from matplotlib.ticker import AutoMinorLocator, MultipleLocator
@@ -264,15 +262,15 @@ class GeneralUtility:
                          gridsize:int,
                          dim:int,
                          p_norm:int,
-                         concat_colours:bool,
                          colour_distances:list[float],
                          verbose:bool = True,
                          good_coloring:bool = True,
-                         tile_grid:bool = False
+                         tile_grid:bool = False,
+                         concat_colours:bool = False,
                          ) -> Tuple[torch.Tensor, torch.Tensor]:
         
         """
-        Evaluates the model on an equidisant grid of points in the domain 
+        Evaluates the model on an equidistant grid of points in the domain
         for a given list of distances.
 
         :param grid_bounds: The bounds of the grid in each dimension.
@@ -280,25 +278,24 @@ class GeneralUtility:
         :param device: The device to evaluate the model on.
         :param n_circle_points: The number of circle points to sample per point.
         :param gridsize: The number of gridpoints in each dimension.
-        :param dim: The dimension of the space.
-        :param p_norm: The norm that induces the distance w.r.t which we sample "unit distance" points.
-        :param colour_distances: The distances to avoid for each colour.
-        :param concat_colours: If the colours should be concatenated with the input. For vanilla Hadwiger Nelson does not need to happen.
+        :param dim: The dimension of the space (2 or 3).
+        :param p_norm: The norm that induces the distance w.r.t. which unit-distance points are sampled.
+        :param colour_distances: The distance to avoid for each colour.
+        :param verbose: If True, show a progress bar over circle points.
+        :param good_coloring: If True, zero out conflicts on points with the last colour.
+        :param tile_grid: If True, wrap proximity points back into the box via tiling.
+        :param concat_colours: Deprecated; must be False.
 
-
-        :return: The colours of the grid points and the number of conflicts per point.
+        :return: Grid colours, conflicts per point, and per-point colour confidences.
         """
+        assert not concat_colours, "concat_colours is no longer supported."
 
-        # Create a meshgrid of the domain
         x_array = torch.linspace(-grid_bounds[0], grid_bounds[0], gridsize)
         y_array = torch.linspace(-grid_bounds[1], grid_bounds[1], gridsize)
 
         if dim == 2:
             x, y = torch.meshgrid(x_array, y_array, indexing = "xy")
-            # flatten it for evaluation of the model
             flattened_input = torch.stack((x.flatten(), y.flatten()), dim=1)
-
-            # total number of samples and how many circle points we sample per point
             n_samples = gridsize**2
         
         elif dim == 3:
@@ -308,75 +305,31 @@ class GeneralUtility:
             n_samples = gridsize**3
         else:
             raise NotImplementedError("Only 2D and 3D are supported.")
-        
-
-        # we now evaluate the model on the grid
-        # to do this, we need to concatenate the grid with the distances (at least for the general PolyChromaticNumber Case)
 
         repeated_distances = torch.tensor(colour_distances).expand(n_samples, -1)
-        if concat_colours:
-            input_with_distances = torch.cat((flattened_input, repeated_distances), dim = 1)
-            model_outs = model(input_with_distances.to(device))
-            grid_colours = model_outs.argmax(dim = -1)
+        model_outs = model(flattened_input.to(device))
+        grid_colours = model_outs.argmax(dim = -1)
 
-            if torch.allclose(model_outs.sum(dim=-1), torch.ones(n_samples, device=device)):
-                probs = model_outs
-            else:
-                probs = model_outs.softmax(dim = -1)
-            grid_confidences = probs.max(dim = -1).values
+        if torch.allclose(model_outs.sum(dim=-1), torch.ones(n_samples, device=device)):
+            probs = model_outs
         else:
-            model_outs = model(flattened_input.to(device))
-            grid_colours = model_outs.argmax(dim = -1)
-
-            if torch.allclose(model_outs.sum(dim=-1), torch.ones(n_samples, device=device)):
-                probs = model_outs
-            else:
-                probs = model_outs.softmax(dim = -1)
-            grid_confidences = probs.max(dim = -1).values
+            probs = model_outs.softmax(dim = -1)
+        grid_confidences = probs.max(dim = -1).values
         
-        # now, for each point in the grid, we need to sample the circle points
-        # we'll take the same circle points for each point
         unit_circle_points = GeneralUtility.sphere(n_circle_points, d=dim, p=p_norm)
         repeated_circle_points = unit_circle_points[None, :, :].expand(n_samples, -1, -1)
-
-        # the distance for each point is determined by the colour it has
         distances = repeated_distances[torch.arange(n_samples), grid_colours.to("cpu")]
-
-        # now we simply need to multiply the circle points with the distances
         distance_circle_points = repeated_circle_points * distances[:, None, None]
-
-        # to avoid OOM we process the proximity points in batches
-        proximity_colours = torch.empty((n_samples, n_circle_points))
 
         conflicts_per_point = torch.zeros(gridsize**dim, device=device)
 
-        if verbose:
-            for i in tqdm(range(n_circle_points)):
-                proximity_points = flattened_input + distance_circle_points[:, i, :]
-                if tile_grid:
-                    proximity_points = GeneralUtility.convert_to_tiling(proximity_points, grid_bounds)
-                if concat_colours:
-                    proximity_points = torch.cat((proximity_points, repeated_distances), dim = 1)
-                    if tile_grid:
-                        proximity_points = GeneralUtility.convert_to_tiling(proximity_points, grid_bounds)
-                proximity_colours = model(proximity_points.to(device)).argmax(dim = -1)
-                conflicts_per_point += (grid_colours == proximity_colours)
-        else:
-            for i in range(n_circle_points):
-                proximity_points = flattened_input + distance_circle_points[:, i, :]
-                if tile_grid:
-                    proximity_points = GeneralUtility.convert_to_tiling(proximity_points, grid_bounds)
-                if concat_colours:
-                    proximity_points = torch.cat((proximity_points, repeated_distances), dim = 1)
-                    if tile_grid:
-                        proximity_points = GeneralUtility.convert_to_tiling(proximity_points, grid_bounds)
-                proximity_colours = model(proximity_points.to(device)).argmax(dim = -1)
-                conflicts_per_point += (grid_colours == proximity_colours)
-
-        # we count the conflicts by checking how many of the proximity points have the same colour
-        #conflicts_per_point = (grid_colours[:, None].cpu() == proximity_colours).sum(dim = 1)
-
-        
+        loop = tqdm(range(n_circle_points)) if verbose else range(n_circle_points)
+        for i in loop:
+            proximity_points = flattened_input + distance_circle_points[:, i, :]
+            if tile_grid:
+                proximity_points = GeneralUtility.convert_to_tiling(proximity_points, grid_bounds)
+            proximity_colours = model(proximity_points.to(device)).argmax(dim = -1)
+            conflicts_per_point += (grid_colours == proximity_colours)
 
         # this is returned to calculate different metrics later
         if dim == 2:
@@ -417,15 +370,8 @@ class GeneralUtility:
 
         x, y, z = torch.meshgrid(x_array, y_array, z_array, indexing = "xy")
 
-        #flattened_input = torch.stack((x.flatten(), y.flatten(), z.flatten()), dim=1)
-
         full_coords = torch.stack((x, y, z), dim=-1)
 
-        n_samples = gridsize**3
-
-        #model_outs = model(flattened_input.to(device))
-        #model_outs = GeneralUtility.get_chunked_output(model, flattened_input, device)
-        # additionally batch over another dimension to avoid OOM
         grid_colours = torch.zeros(gridsize, gridsize, gridsize, device=device)
         for i in tqdm(range(gridsize)):
             grid_colours[i] = model(full_coords[i].to(device)).argmax(dim = -1)
@@ -437,8 +383,6 @@ class GeneralUtility:
         for i in tqdm(range(n_circle_points)):
 
             proximity_points = full_coords + circle_points[i]
-            #proximity_colours = model(proximity_points.to(device)).argmax(dim = -1)
-            #proximity_colours = GeneralUtility.get_chunked_output(model, proximity_points, device).argmax(dim = -1)
             proximity_colours = torch.zeros(gridsize, gridsize, gridsize, device=device)
             for j in range(gridsize):
                 proximity_colours[j] = model(proximity_points[j].to(device)).argmax(dim = -1)
@@ -462,8 +406,6 @@ class GeneralUtility:
                              gridsize:int,
                              n_colours:int,
                              save_path:str = None,
-                             center_coords:torch.Tensor = None,
-                             center_logits:torch.Tensor = None,
                              parallelogram:torch.Tensor = None,):
         
         conflicts_mask = conflicts_per_point > 0
@@ -477,7 +419,6 @@ class GeneralUtility:
 
         plt.title("Coloring")
         plt.pcolor(x_array, y_array, grid_colours.cpu(), cmap=plt.cm.get_cmap("Pastel1", n_colours), vmin=0, vmax=n_colours - 1)
-        # plt.colorbar(drawedges=True, location=cbar_location, shrink=shrink)
         ax = plt.gca()
         ax.set_aspect('equal')
 
@@ -485,18 +426,13 @@ class GeneralUtility:
         ax.yaxis.set_major_locator(MultipleLocator(1))
         ax.xaxis.set_minor_locator(AutoMinorLocator(10))
         ax.yaxis.set_minor_locator(AutoMinorLocator(10))
-        ax.tick_params(axis='x', which='major', length=6, width=1.5)  # Big ticks
-        ax.tick_params(axis='x', which='minor', length=3, width=1)  # Small ticks
-        ax.tick_params(axis='y', which='major', length=6, width=1.5)  # Big ticks
+        ax.tick_params(axis='x', which='major', length=6, width=1.5)
+        ax.tick_params(axis='x', which='minor', length=3, width=1)
+        ax.tick_params(axis='y', which='major', length=6, width=1.5)
         ax.tick_params(axis='y', which='minor', length=3, width=1)
 
-        # set x and y limits
         ax.set_xlim(-grid_bounds[0], grid_bounds[0])
         ax.set_ylim(-grid_bounds[1], grid_bounds[1])
-
-
-        if center_coords is not None:
-            plt.scatter(center_coords[:, 0], center_coords[:, 1], c='black', s=10, alpha=0.5)
 
         if parallelogram is not None:
 
@@ -563,8 +499,6 @@ class GeneralUtility:
                              gridsize:int,
                              n_colours:int,
                              save_path:str = None,
-                             center_coords:torch.Tensor = None,
-                             center_logits:torch.Tensor = None,
                              parallelogram:torch.Tensor = None,):
         
         conflicts_mask = conflicts_per_point > 0
@@ -579,7 +513,6 @@ class GeneralUtility:
 
         plt.title("Coloring")
         plt.pcolor(x_array, y_array, grid_colours.cpu(), cmap=plt.cm.get_cmap("Pastel1", n_colours), vmin=0, vmax=n_colours - 1)
-        # plt.colorbar(drawedges=True, location=cbar_location, shrink=shrink)
         ax = plt.gca()
         ax.set_aspect('equal')
 
@@ -587,18 +520,13 @@ class GeneralUtility:
         ax.yaxis.set_major_locator(MultipleLocator(1))
         ax.xaxis.set_minor_locator(AutoMinorLocator(10))
         ax.yaxis.set_minor_locator(AutoMinorLocator(10))
-        ax.tick_params(axis='x', which='major', length=6, width=1.5)  # Big ticks
-        ax.tick_params(axis='x', which='minor', length=3, width=1)  # Small ticks
-        ax.tick_params(axis='y', which='major', length=6, width=1.5)  # Big ticks
+        ax.tick_params(axis='x', which='major', length=6, width=1.5)
+        ax.tick_params(axis='x', which='minor', length=3, width=1)
+        ax.tick_params(axis='y', which='major', length=6, width=1.5)
         ax.tick_params(axis='y', which='minor', length=3, width=1)
 
-        # set x and y limits
         ax.set_xlim(-grid_bounds[0], grid_bounds[0])
         ax.set_ylim(-grid_bounds[1], grid_bounds[1])
-
-
-        if center_coords is not None:
-            plt.scatter(center_coords[:, 0], center_coords[:, 1], c='black', s=10, alpha=0.5)
 
         if parallelogram is not None:
             
@@ -618,6 +546,12 @@ class GeneralUtility:
             plt.plot([corner_0[0], corner_2[0]], [corner_0[1], corner_2[1]], color='black', linewidth=0.5)
             plt.plot([corner_1[0], corner_3[0]], [corner_1[1], corner_3[1]], color='black', linewidth=0.5)
             plt.plot([corner_2[0], corner_3[0]], [corner_2[1], corner_3[1]], color='black', linewidth=0.5)
+
+            # plot original parallelogram (to understand effects at the edges)
+            plt.plot([0, a[0]], [0, a[1]], color='black', linewidth=0.5)
+            plt.plot([0, b[0]], [0, b[1]], color='black', linewidth=0.5)
+            plt.plot([a[0], a[0] + b[0]], [a[1], a[1] + b[1]], color='black', linewidth=0.5)
+            plt.plot([b[0], a[0] + b[0]], [b[1], a[1] + b[1]], color='black', linewidth=0.5)
 
         plt.subplot(132)
 
@@ -666,90 +600,6 @@ class GeneralUtility:
         else:
             plt.show()
 
-    @staticmethod
-    def oom_aware_model_output(model, input_tensor, device):
-        """Processes the input tensor in chunks of adaptive size to avoid
-        cuda out of memory errors.
-        """
-        chunk_size = input_tensor.shape[0]
-        chunk_reduction_factor = 2
-        min_chunk_size = 8
-
-        while chunk_size >= min_chunk_size:
-            try:
-                chunks = torch.chunk(input_tensor, input_tensor.shape[0] // chunk_size, dim=0)
-                results = [model(chunk.to(device)) for chunk in chunks]
-                return torch.cat(results, dim=0)
-
-            except RuntimeError as e:
-                if "CUDA out of memory" in str(e):
-                    chunk_size = chunk_size // chunk_reduction_factor
-                else:
-                    raise e
-
-        raise RuntimeError("Input chunks are too small to process without running out of memory.")
-    
-    @staticmethod
-    def get_chunked_output(model, input_tensor, device, reduction_factor=64):
-        """Processes the input tensor in chunks of fixed size to avoid
-        cuda out of memory errors.
-        """
-        chunks = torch.chunk(input_tensor, reduction_factor, dim=0)
-        results = [model(chunk.to(device)) for chunk in chunks]
-        return torch.cat(results, dim=0)
-    
-
-class NotebookUtility:
-    """Utility functions for jupyter notebooks."""
-
-    @staticmethod
-    def eval_model(model, input, dist, device):
-        input = torch.cat((input, dist * torch.ones(input.size(0), 1).to(device)), dim=1)
-        with torch.no_grad():
-            return model(input).cpu()
-
-    @staticmethod    
-    def modulo_repeat_pad(tensor, old_x, old_y, new_x, new_y):
-        H = tensor.shape[0]
-        W = tensor.shape[1]
-        
-        resolution = int(H / old_y)
-        assert abs(resolution - int(W / old_x)) <= 1, (resolution, int(W / old_x))
-        
-        x_resolution = int(resolution * new_x)
-        y_resolution = int(resolution * new_y)
-        
-        pad_left = floor((x_resolution-W)/2)
-        pad_right = ceil((x_resolution-W)/2)
-        pad_top = floor((y_resolution-H)/2)
-        pad_bottom = ceil((y_resolution-H)/2)
-        
-        rows = torch.arange(-pad_top, H + pad_bottom) % H
-        cols = torch.arange(-pad_left, W + pad_right) % W
-        
-        padded_tensor = tensor[rows][:, cols]
-
-        return padded_tensor
-
-    @staticmethod
-    def points_at_distance(tensor, dist, base_circle_points, nr_of_points, resolution):
-        H, W, C = tensor.shape
-        
-        output = torch.zeros(H, W, nr_of_points, C)
-        
-        circle = dist*base_circle_points
-        
-        for i, (x, y) in list(enumerate(circle)):
-            x_shift = int(x * resolution)
-            y_shift = int(y * resolution)
-            
-            rows = torch.arange(y_shift, H + y_shift) % H
-            cols = torch.arange(x_shift, W + x_shift) % W
-            
-            output[:,:,i,:] = tensor[rows][:, cols]
-        
-        return output
-
 class SequentialSchedulers(torch.optim.lr_scheduler.SequentialLR):
     """
     Repairs SequentialLR to properly use the last learning rate of the previous scheduler when reaching milestones
@@ -771,61 +621,4 @@ class Sin(torch.nn.Module):
 
     def forward(self, forward_input: torch.Tensor) -> torch.Tensor:
         return torch.sin(forward_input)
-
-class RunTerminator:
-    """
-    Class to terminate a run if a given metric
-    hasn't sufficiently increased / decreased after
-    a given amount of steps.
-    """
-
-    def __init__(self, **config):
-
-        self.metric = config['metric']  # Metric to monitor
-        self.orientation = config['orientation']  # minimize or maximize
-        self.threshold = config['threshold']  # Threshold to check against
-        self.patience = config['patience']  # Number of steps to wait before checking for termination
-
-        # Internal variables
-        self.step = 1
-        self.best_metric = None
-
-        self.is_null = config['metric'] is None or \
-                       config['orientation'] is None or \
-                       config['threshold'] is None or \
-                       config['patience'] is None
-
-    def update(self, metrics: dict[str, float]):
-        """Update the current metrics."""
-        if not self.is_null:
-            if self.best_metric is None:
-                self.best_metric = metrics[self.metric]
-            else:
-                if self.orientation == 'minimize':
-                    if metrics[self.metric] < self.best_metric:
-                        self.best_metric = metrics[self.metric]
-                elif self.orientation == 'maximize':
-                    if metrics[self.metric] > self.best_metric:
-                        self.best_metric = metrics[self.metric]
-
-    def check_termination(self) -> bool:
-        """Check if the run should be terminated."""
-        if self.is_null:
-            return False
-
-        if self.step >= self.patience:
-            if self.orientation == "minimize":
-                return self.best_metric > self.threshold
-            elif self.orientation == "maximize":
-                return self.best_metric < self.threshold
-            
-    def check_termination_and_update(self) -> bool:
-        """Check if the run should be terminated and update the step count."""
-        termination_status = self.check_termination()
-        if termination_status:
-            sys.stdout.write(f"Metric {self.metric} reached {self.threshold} at step {self.step}. Terminating run.")
-        self.step += 1
-        return termination_status
-
-
 
