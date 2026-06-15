@@ -88,6 +88,15 @@ python main.py --debug
 
 ## Tasks
 
+### Onboarding Task (Highly Recommended First Step)
+* [ ] **Build a unified local pipeline script** (e.g. `run_pipeline.py`) that handles the end-to-end training and evaluation loop. It should:
+  1. Trigger a training run (with custom configuration) and save the checkpoint.
+  2. Parse the resulting run ID and configuration.
+  3. Automatically run the discrete coloring MILP solver (`verify_paralellogram_ip.py`) on the trained checkpoint.
+  4. Output the final, verified bonus color percentage.
+  *This gives the agent a single, frictionless command to evaluate any code or hyperparameter changes instantly.*
+
+### Core Research Tasks
 * [ ] Find an almost 5-coloring with less than **3.74%** of the pixels covered by the bonus color (color index 5) on any discretization grid.
 * [ ] Formalize the best constructions you can find for $c = 1, \dots, 6$. (Note that in the config one needs to pass $c+1$ total colors).
 * [ ] Implement Connected-Component Decomposition in the ILP/MILP solver (`scripts/verify_paralellogram_ip.py`) to scale evaluations to grid sizes $\ge 512 \times 512$ efficiently.
