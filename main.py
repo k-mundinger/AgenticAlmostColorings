@@ -71,13 +71,6 @@ defaults = dict(
         log_imgs_every_k_steps=1000,  # how often to log images
         log_model_every_k_steps=100000,  # how often to log the model
     ),
-
-    kill_criterion=dict(
-        metric=None,  # which metric to monitor
-        orientation="minimize",  # whether metric is "good" when it is low or high
-        threshold=0.1,  # at which threshold to kill
-        patience=10000,  # after how many steps to kill
-    )
 )
 
 if not debug:

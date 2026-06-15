@@ -126,11 +126,6 @@ class GeneralUtility:
 
         assert isinstance(config.training['batch_size'], int), "Batch size must be an integer."
 
-        assert config.kill_criterion["patience"] is None or \
-               config.metrics["log_metrics_every_k_steps"] <= config.kill_criterion[
-                   "patience"], "We need to log at least once before we can check if a run should be terminated."
-        
-
     @staticmethod
     def config_has_unknown_params(config: wandb.Config, defaults: dict) -> Tuple[bool, list]:
         """Recursively check if there are unknown config parameters, i.e. parameters that are not in the defaults."""
