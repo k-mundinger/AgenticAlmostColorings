@@ -44,7 +44,7 @@ defaults = dict(
         loss_fn="log_prob",
         grid_sizes=(6,6),  # Must be a tuple with the grid sizes for each dimension (var dim)
         p_norm=2,  # The norm that induces the distance w.r.t which we sample "unit distance" points
-        n_circle_points=8, # number of proximity points to sample for each colour
+        n_circle_points=32, # number of proximity points to sample for each colour
         temperature=0.0,  # circle-point aggregation: <0 hard max, 0 plain mean, >0 softmax-weighted
         good_coloring=True,  # for lagrangian term for last colour
         good_coloring_weight=0.01,
@@ -81,10 +81,12 @@ if not debug:
 defaults['computer'] = socket.gethostname()
 
 # Configure wandb logging
+wandb_project = os.getenv('WANDB_PROJECT', 'test-000')
+wandb_entity = os.getenv('WANDB_ENTITY', None)
 wandb.init(
     config=defaults,
-    project='test-000',  # automatically changed in sweep
-    entity=None,  # automatically changed in sweep
+    project=wandb_project,  # automatically changed in sweep
+    entity=wandb_entity,    # automatically changed in sweep
 )
 config = wandb.config
 config = GeneralUtility.update_config_with_default(config, defaults)
@@ -134,10 +136,24 @@ with tempdir() as tmp_dir:
     runner = Runner(config=config, tmp_dir=tmp_dir, debug=debug)
     runner.run()
 
+    # Save a persistent copy of all outputs to models/run_id/ before the tempdir is deleted
+    if wandb.run is not None:
+        run_id = wandb.run.id
+        local_dir = os.path.join("models", run_id)
+        os.makedirs(local_dir, exist_ok=True)
+        for item in os.listdir(tmp_dir):
+            s = os.path.join(tmp_dir, item)
+            d = os.path.join(local_dir, item)
+            if os.path.isdir(s):
+                shutil.copytree(s, d, dirs_exist_ok=True)
+            else:
+                shutil.copy2(s, d)
+        sys.stdout.write(f"Saved persistent local copy of all outputs to {local_dir}.\n")
+
     # Close wandb run
-    wandb_dir_path = wandb.run.dir
+    wandb_dir_path = wandb.run.dir if wandb.run is not None else None
     wandb.join()
 
     # Delete the local files
-    if os.path.exists(wandb_dir_path):
+    if wandb_dir_path and os.path.exists(wandb_dir_path):
         shutil.rmtree(wandb_dir_path)

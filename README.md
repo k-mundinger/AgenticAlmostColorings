@@ -1,5 +1,10 @@
 ## Improving almost colorings
 
+This repository contains the codebase and tools to research and find **almost colorings** of the plane (and space) with $c$ colors. It is based on the paper: [https://arxiv.org/pdf/2501.18527](https://arxiv.org/pdf/2501.18527) which formalizes the mathematics and computational approach.
+
+An almost-$c$-coloring of the plane is defined as a coloring of a subset of the plane with $c$ colors such that no two points in that subset at unit distance share the same color. In other words, we seek the minimum density of the "removed" (uncolored) set such that the remaining points can be colored with $c$ colors without monochromatic unit-distance pairs.
+
+In our neural network formulation, we represent the "removed" set by introducing an additional $(c+1)$-th "bonus" (uncolored) color, and minimize its density using a Lagrangian relaxation approach.
 
 ## Algorithm 1: Automated almost-coloring formalization
 
@@ -11,26 +16,81 @@ $$\mathcal{P} = \{\alpha v_1 + \beta v_2 : \alpha, \beta \in [0, 1)\}$$
 along the lattice $\Lambda = \{n_1 v_1 + n_2 v_2 : n_1, n_2 \in \mathbb{Z}\}$.
 3. **Periodicity-constrained retraining.** Form the invertible change-of-basis matrix $M = [v_1 \ v_2] \in \mathbb{R}^{2 \times 2}$. Prepend the mapping $x \mapsto M^{-1}x \pmod 1$ to $p_\theta$, which enforces exact periodicity over $\Lambda$, and retrain.
 4. **Discrete almost-coloring.** Discretize $\mathcal{P}$ into $kl$ copies of $\{\alpha v_1 / k + \beta v_2 / l : \alpha, \beta \in [0, 1)\}$ and determine a color for each parallelogram pixel by sampling $p_\theta$ at its respective center.
-5. **Iteratively fix remaining conflicts.** Determine a discrete mask in which conflicts need to be avoided around each parallelogram pixel to obtain a formal coloring. Iteratively reduce any remaining conflicts by solving an auxiliary minimum edge cover problem and recoloring some parallelograms. After a fixed number of rounds, resolve any remaining conflicts by recoloring with the additional color $c + 1$.
+5. **Iteratively fix remaining conflicts.** Determine a discrete mask in which conflicts need to be avoided around each parallelogram pixel to obtain a formal coloring. Iteratively reduce any remaining conflicts by solving an auxiliary minimum edge cover problem and recoloring some parallelograms. After a fixed number of rounds, resolve any remaining conflicts by recoloring with the additional color $c + 1$ (the bonus color).
 
-Here, we want to skip step 1 and 2 and directly start with step 3. The vectors themselves are implemented as trainable parameters as of now so let's just play around with different values. We want to focus our research mainly on **step 5**. After obtaining a discrete (constant on parallelogram pixels) coloring, it is not exactly clear 
+Here, we skip step 1 and 2 and directly start with step 3. The vectors themselves are implemented as trainable parameters as of now, so we can search/optimize different starting values. 
+
+We want to focus our research mainly on **step 5**. After obtaining a discrete (constant on parallelogram pixels) coloring, it is not exactly clear how to optimize the pixel recoloring to minimize the density of the bonus color. Since the discretization introduces a finite "conflict mask" (specifying which pixel offsets on the torus can conflict at distance exactly 1), we can cast this as an Integer Linear Program (ILP) or Mixed Integer Linear Program (MILP), as prototyped in `scripts/verify_paralellogram_ip.py`. The goal is to find the assignment of real colors and the bonus color that minimizes the percentage of pixels assigned to the bonus color while guaranteeing that no two real-colored pixels at distance approximately 1 share the same color.
 
 ---
 
 ## Results Table
 
+The values in this table correspond to known continuous analytical/geometric constructions (not to any specific discretization grid size). Finding a better value on **any** grid size is a success. Generally, the smaller the pixels (i.e., the larger the grid size), the better the discrete approximation can get.
+
 | # colors | 1 | 2 | 3 | 4 | 5 | 6 |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
 | **best known** | 77.04% | 54.13% | 31.20% | 8.25% | 3.74% | 0.0149% |
 
-## Ideas
+---
 
-* The hyperparameters in the training stage were not really tuned for this problem. We think that small MLPs (2-4 hidden layers, 32 - 128 hidden units per layer) with `sin` activation and siren initialization work reasonably well here but that is not settled. Same goes for learning rate schedule, weight decay etc. 
-* The formulation with the lagrange weight is a bit ugly because it's a pain to tune. Here it could be cool to find some bilevel strategy to optimize the lagrange weight.
-* Making the parallelogram trainable in the same way as the NN parameters is probably suboptimal. We should experiment with at least a different learning rate but probably even a strategy where we freeze the parallelogram for some steps and then unfreeze it (maybe even sometimes freeze the NN parameters for some steps and train only the parallelogram).
-* Definitely pursue LP formulations of step 5 in the algorithm up there. Writing the LP down is easy (minimize number of bonus pixels such that no cells at distance approximate 1 have the same color, routines to get the cells at distance approximate 1 are in the verify_parallelogram.py files). But already for moderate discretizations solution might get a bit ugly, so think of routines. Definitely experiment with solving it with ipopt, simplex, other nice LP ormulations.
+## Getting Started & Offline Running
+
+### Setup
+Install the required packages:
+```bash
+pip install -r requirements.txt
+```
+
+### Running Training
+To start a training run:
+```bash
+python main.py --debug
+```
+*Note: In debug mode (`--debug` in arguments), default parameters are used and a short runs/sweeps profile is executed. Without `--debug`, all config fields default to `None` for hyperparameter sweeps.*
+
+### Local & Offline Runs
+You do not need a connection to the Weights & Biases (W&B) cloud to run this code. You can disable W&B logging or run offline:
+```bash
+# Run completely offline (W&B metadata and runs are saved locally)
+export WANDB_MODE=offline
+python main.py --debug
+
+# Disable W&B entirely
+export WANDB_MODE=disabled
+python main.py --debug
+```
+
+### Persistent Local Checkpoints
+When a training run completes, the trained model, config, and plots are automatically copied from the temporary directory to the persistent path:
+`./models/{run_id}/`
+This ensures your results survive tempdir cleanup, making it easy to run evaluation scripts locally.
+
+### Custom W&B Settings
+If you do want to log to your own W&B account, set these environment variables before running:
+```bash
+export WANDB_PROJECT="your-project-name"
+export WANDB_ENTITY="your-username"
+python main.py --debug
+```
+
+---
+
+## Ideas & Research Directions
+
+* **Hyperparameter Tuning:** The hyperparameters in the training stage have not been thoroughly tuned. Small MLPs (2–4 hidden layers, 32–128 units) with `sin` activations and siren initialization perform well, but learning rates, schedules, and weight decay can be heavily optimized.
+* **Bilevel Optimization for Lagrange Weight:** The formulation uses a Lagrangian term (`good_coloring_weight`) for the last color, which is painful to tune. Investigating a bilevel optimization strategy or a dynamic weight scheduler for the Lagrangian coefficient could make training more robust.
+* **Alternating Parallelogram Optimization:** Making the parallelogram basis trainable alongside the neural network parameters is often unstable. Experiment with alternating optimization schemes: freeze the parallelogram basis and train the network, then freeze the network and train the basis (or use highly asymmetric learning rates).
+* **Step 5 ILP Optimization (Connected-Component Decomposition):**
+  * Writing the MILP is straightforward (see `scripts/verify_paralellogram_ip.py`), but for large/fine grids (e.g. 512x512 or larger), solving a single massive MILP is extremely slow or fails due to memory limits.
+  * *Speedup Strategy:* Since conflicts are typically sparse and highly localized, we can build the conflict graph, extract its connected components, and solve a separate independent MILP for each component. Any non-conflicting components or pixels can remain frozen. This allows solving Step 5 on extremely fine discretizations (e.g., 1024x1024) in seconds!
+* **Generalizing to 3D:** Once 2D coloring improves, generalize and apply the same pipeline to 3D (starting from `scripts/verify_parallelogram_3d_speedup.py`).
 
 ## Tasks
 
-* [] A "success" would be an almost 5 coloring with less than 3.74% of pixels covered using the "bonus" color. 
-* [] Once all of that is done we apply it to 3D. 
+* [ ] Find an almost 5-coloring with less than **3.74%** of the pixels covered by the bonus color (color index 5) on any discretization grid.
+* [ ] Formalize the best constructions you can find for $c = 1, \dots, 6$. (Note that in the config one needs to pass $c+1$ total colors).
+* [ ] Implement Connected-Component Decomposition in the ILP/MILP solver (`scripts/verify_paralellogram_ip.py`) to scale evaluations to grid sizes $\ge 512 \times 512$ efficiently.
+* [ ] Design an alternating optimization schedule (joint/alternating coordinate descent) for training the network and the parallelogram basis vectors in `runner.py`.
+* [ ] Experiment with dynamic/adaptive schedules for the Lagrange term `good_coloring_weight` to automate the tuning of the penalty weight.
+* [ ] Generalize/apply findings to 3D. Only start this if you are done with 2D completely.
