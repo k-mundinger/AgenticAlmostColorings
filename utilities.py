@@ -74,34 +74,6 @@ class GeneralUtility:
         return configDict
 
     @staticmethod
-    @torch.no_grad()
-    def convert_to_tiling(points: torch.Tensor, grid_bounds: tuple[float]) -> torch.Tensor:
-        """Converts datapoints to tiling, as if box was repeated in every dimension. Every point beyond the box is
-         modulo'ed back into the box.
-        :param points: Points to convert
-        :param grid_bounds: Bounds of the grid in each dimension
-        """
-        points = points.clone().detach()
-
-        # Get the overhead in each dimension
-        overheads = []
-        for i, bound in enumerate(grid_bounds):
-            axis = points[..., i]
-            overhead = axis.sign() * torch.nn.functional.relu(axis.abs() - bound)
-            overheads.append(overhead)
-
-        # Add the overhead to the points such as the box was repeated in every dimension
-        for i, overhead in enumerate(overheads):
-            overhead_pos = overhead[overhead > 0]
-            overhead_neg = overhead[overhead < 0]
-            bound = grid_bounds[i]
-            points[..., i][overhead > 0] = -bound + overhead_pos
-            points[..., i][overhead < 0] = bound + overhead_neg
-
-        return points
-
-
-    @staticmethod
     def prepend_centering_scaling_to_module(model: torch.nn.Module, scaling: Optional[float],
                                             centering: Optional[float]) -> torch.nn.Module:
         """Prepends a scaling layer to the model, if scaling is not None."""
@@ -265,7 +237,6 @@ class GeneralUtility:
                          colour_distances:list[float],
                          verbose:bool = True,
                          good_coloring:bool = True,
-                         tile_grid:bool = False,
                          concat_colours:bool = False,
                          ) -> Tuple[torch.Tensor, torch.Tensor]:
         
@@ -283,7 +254,6 @@ class GeneralUtility:
         :param colour_distances: The distance to avoid for each colour.
         :param verbose: If True, show a progress bar over circle points.
         :param good_coloring: If True, zero out conflicts on points with the last colour.
-        :param tile_grid: If True, wrap proximity points back into the box via tiling.
         :param concat_colours: Deprecated; must be False.
 
         :return: Grid colours, conflicts per point, and per-point colour confidences.
@@ -326,8 +296,6 @@ class GeneralUtility:
         loop = tqdm(range(n_circle_points)) if verbose else range(n_circle_points)
         for i in loop:
             proximity_points = flattened_input + distance_circle_points[:, i, :]
-            if tile_grid:
-                proximity_points = GeneralUtility.convert_to_tiling(proximity_points, grid_bounds)
             proximity_colours = model(proximity_points.to(device)).argmax(dim = -1)
             conflicts_per_point += (grid_colours == proximity_colours)
 

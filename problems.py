@@ -27,7 +27,6 @@ class ProblemBaseClass(ABC):
 
         self.n_colours = self.config['n_colours']
         self.dim = self.config['dim']
-        self.tile_grid = self.config.training['tile_grid']
         self.p_norm = self.config.training['p_norm']
         self.grid_bounds = [0.5*b for b in self.config.training['grid_sizes']]
         self.grid_input_scale = self.config.training['grid_input_scale']
@@ -174,9 +173,6 @@ class HadwigerNelson(ProblemBaseClass):
         )
         proximity_points = anchor_points[:, None, :] + unit_circle_points
 
-        if self.tile_grid:
-            proximity_points = GeneralUtility.convert_to_tiling(proximity_points, self.grid_bounds)
-
         return {'anchor_points': anchor_points, 'proximity_points': proximity_points}
 
     def get_metrics(self, **kwargs) -> dict[str, float]:
@@ -203,7 +199,6 @@ class HadwigerNelson(ProblemBaseClass):
             dim=self.dim,
             p_norm=self.p_norm,
             good_coloring=good_coloring,
-            tile_grid=self.config["training"]["tile_grid"],
         )
 
     def log_plots(self, save_path, parallelogram=None, step: int | None = None) -> None:

@@ -40,13 +40,12 @@ defaults = dict(
         # General
         n_steps=20000,  # total number of parameter updates
         batch_size=2048,  # Batch size for training
-        tile_grid=False,  # Whether to tile the grid or not
         grid_input_scale=1,  # Scale of the grid as how it is input to the network
         loss_fn="log_prob",
         grid_sizes=(6,6),  # Must be a tuple with the grid sizes for each dimension (var dim)
         p_norm=2,  # The norm that induces the distance w.r.t which we sample "unit distance" points
         n_circle_points=8, # number of proximity points to sample for each colour
-        temperature=5.0, # temperature for weighting the circle points, -1 means infty, i.e. hard selecting the max
+        temperature=1.0, # temperature for weighting the circle points, -1 means infty, i.e. hard selecting the max
         good_coloring=True,  # for lagrangian term for last colour
         good_coloring_weight=0.01,
         parallelogram=[[2.0, 1.0], 
