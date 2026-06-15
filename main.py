@@ -69,7 +69,7 @@ defaults = dict(
         val_grid_size=128, # grid size for the metrics
         n_circle_points=128, # the same for plots and metrics
         log_metrics_every_k_steps=1000,  # how often to log metrics
-        log_imgs_every_k_steps=500,  # how often to log images
+        log_imgs_every_k_steps=1000,  # how often to log images
         log_model_every_k_steps=100000,  # how often to log the model
     ),
 

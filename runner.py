@@ -160,7 +160,7 @@ class Runner:
 
         return problem
 
-    def log(self):
+    def log(self, step: int):
         """
         Logs the current training status.
         """
@@ -170,14 +170,25 @@ class Runner:
         for metric_type, val in loggingDict.items():
             wandb.run.summary[f"{metric_type}"] = val
 
-        wandb.log(loggingDict)
+        wandb.log(loggingDict, step=step)
+
+    @staticmethod
+    def _parallelogram_log_dict(parallelogram: torch.Tensor, parallelogram_eval: dict) -> dict:
+        log_dict = {
+            f"parallelogram_{i}_{j}": parallelogram[i][j].item()
+            for i in range(parallelogram.shape[0])
+            for j in range(parallelogram.shape[1])
+        }
+        log_dict["parallelogram_eval"] = parallelogram_eval
+        return log_dict
 
     def train(self):
         """
         Main training loop in the parametric setting, i.e. where we sample from predefined intervals and update.
         """
         self.problem_metrics = self.problem.get_metrics()
-        self.log(); self.reset_averaged_metrics()
+        self.log(step=0)
+        self.reset_averaged_metrics()
 
         for step in tqdm(range(1, self.config.training['n_steps'] + 1, 1)):
             if step % self.config.metrics['log_metrics_every_k_steps'] == 0:
@@ -209,58 +220,75 @@ class Runner:
             self.metrics['train']['loss'](value=loss, weight=self.effective_batch_size)
 
             is_last_step = step == self.config.training['n_steps']
-            should_log_by_type = {log_type: is_last_step or (step % self.config.metrics[f'log_{log_type}_every_k_steps'] == 0) 
-                          for log_type in ['imgs', 'metrics', 'model']}
+            log_imgs_every = self.config.metrics['log_imgs_every_k_steps']
+            log_metrics_every = self.config.metrics['log_metrics_every_k_steps']
+            log_model_every = self.config.metrics['log_model_every_k_steps']
 
-            if should_log_by_type['imgs'] and self.problem.dim == 2:
+            # --- logging schedule (edit conditions here) ---
+            log_imgs = self.problem.dim == 2 and (
+                step == 1
+                or step % log_imgs_every == 0
+                or is_last_step
+            )
+            log_metrics = (
+                step % log_metrics_every == 0
+                or is_last_step
+            )
+            log_model = (
+                step % log_model_every == 0
+                or is_last_step
+            )
+
+            if log_imgs:
                 if self.config["training"]["parallelogram"]:
-                    #parallelogram = torch.tensor(self.config["training"]["parallelogram"]).to(self.device)
                     parallelogram = torch.linalg.inv(self.problem.model.inv_transf_matrix.detach())
-
-                    self.problem.log_plots(save_path=self.tmp_dir, parallelogram=parallelogram.cpu())
+                    self.problem.log_plots(
+                        save_path=self.tmp_dir,
+                        parallelogram=parallelogram.cpu(),
+                        step=step,
+                    )
                 else:
-                    self.problem.log_plots(save_path=self.tmp_dir)
-            if should_log_by_type['metrics']:
+                    self.problem.log_plots(save_path=self.tmp_dir, step=step)
+
+            if log_metrics:
                 self.problem_metrics = self.problem.get_metrics()
-                self.log()
+                self.log(step=step)
                 if self.config["training"]["parallelogram"]:
-                    #parallelogram = torch.tensor(self.config["training"]["parallelogram"]).to(self.device)
                     parallelogram = torch.linalg.inv(self.problem.model.inv_transf_matrix.detach())
-                    parallelogram_eval = GeneralUtility.get_parallelogram_eval(model=self.problem.model,
-                                                                                parallelogram=parallelogram,
-                                                                                gridsize = self.config["metrics"]["val_grid_size"],
-                                                                                n_circle_points = self.config["metrics"]["n_circle_points"],
-                                                                                n_colours=self.config["n_colours"],
-                                                                            )
-                    
-                    
+                    parallelogram_eval = GeneralUtility.get_parallelogram_eval(
+                        model=self.problem.model,
+                        parallelogram=parallelogram,
+                        gridsize=self.config["metrics"]["val_grid_size"],
+                        n_circle_points=self.config["metrics"]["n_circle_points"],
+                        n_colours=self.config["n_colours"],
+                    )
+                    wandb.log(
+                        self._parallelogram_log_dict(parallelogram, parallelogram_eval),
+                        step=step,
+                    )
 
-                    for i in range(parallelogram.shape[0]):
-                        for j in range(parallelogram.shape[1]):
-                            wandb.log({f"parallelogram_{i}_{j}": parallelogram[i][j].item()})
-
-                    wandb.log({"parallelogram_eval": parallelogram_eval})
-                    
-
-            if should_log_by_type['model']:
-                GeneralUtility.save_model(model=self.problem.model, model_identifier=f'step_{step}', tmp_dir=self.tmp_dir, sync=True)
+            if log_model:
+                GeneralUtility.save_model(
+                    model=self.problem.model,
+                    model_identifier=f'step_{step}',
+                    tmp_dir=self.tmp_dir,
+                    sync=True,
+                )
 
         if self.config["training"]["parallelogram"] is not None:
+            final_step = self.config.training['n_steps']
             parallelogram = torch.linalg.inv(self.problem.model.inv_transf_matrix.detach())
-            parallelogram_eval = GeneralUtility.get_parallelogram_eval(model=self.problem.model,
-                                                                        parallelogram=parallelogram,
-                                                                        gridsize = self.config["metrics"]["val_grid_size"],
-                                                                        n_circle_points = self.config["metrics"]["n_circle_points"],
-                                                                        n_colours=self.config["n_colours"],
-                                                                       )
-            
-            
-
-            
-            for i in range(parallelogram.shape[0]):
-                        for j in range(parallelogram.shape[1]):
-                            wandb.log({f"parallelogram_{i}_{j}": parallelogram[i][j].item()})
-            wandb.log({"parallelogram_eval": parallelogram_eval}, commit=True)
+            parallelogram_eval = GeneralUtility.get_parallelogram_eval(
+                model=self.problem.model,
+                parallelogram=parallelogram,
+                gridsize=self.config["metrics"]["val_grid_size"],
+                n_circle_points=self.config["metrics"]["n_circle_points"],
+                n_colours=self.config["n_colours"],
+            )
+            wandb.log(
+                self._parallelogram_log_dict(parallelogram, parallelogram_eval),
+                step=final_step,
+            )
 
     def run(self):
         """Controls the execution of the script."""

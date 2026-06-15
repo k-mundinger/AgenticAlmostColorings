@@ -153,7 +153,7 @@ class ProblemBaseClass(ABC):
         pass
 
     @abc.abstractmethod
-    def log_plots(self, save_path, parallelogram=None) -> None:
+    def log_plots(self, save_path, parallelogram=None, step: int | None = None) -> None:
         pass
 
 
@@ -206,7 +206,7 @@ class HadwigerNelson(ProblemBaseClass):
             tile_grid=self.config["training"]["tile_grid"],
         )
 
-    def log_plots(self, save_path, parallelogram=None) -> None:
+    def log_plots(self, save_path, parallelogram=None, step: int | None = None) -> None:
         save_path = os.path.join(save_path, "current_plot.png")
         grid_colours, conflicts_per_point, grid_confidences = self.evaluate_on_grid(
             gridsize=self.config.metrics['plot_grid_size'],
@@ -232,4 +232,4 @@ class HadwigerNelson(ProblemBaseClass):
         else:
             GeneralUtility.create_conflict_plot(**plot_kwargs)
 
-        wandb.log({"Colouring": wandb.Image(save_path)}, commit=False)
+        wandb.log({"Colouring": wandb.Image(save_path)}, step=step)
