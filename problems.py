@@ -93,11 +93,13 @@ class ProblemBaseClass(ABC):
             else:
                 same_colour_prob = prods_of_probabilities.sum(dim=-1)
 
-            if temperature is not None and temperature > 0:
+            if temperature is None or temperature < 0:
+                probs = same_colour_prob.max(dim=1)[0]
+            elif temperature == 0:
+                probs = same_colour_prob.mean(dim=1)
+            else:
                 weights = torch.nn.Softmax(dim=-1)(same_colour_prob * temperature)
                 probs = (same_colour_prob * weights).sum(dim=1)
-            else:
-                probs = same_colour_prob.max(dim=1)[0]
 
             loss = -torch.log(1. - probs) if loss_fn_name == 'log_prob' else probs
 
