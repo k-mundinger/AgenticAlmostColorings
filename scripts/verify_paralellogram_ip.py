@@ -1,5 +1,8 @@
 import argparse
+import json
+import os
 import sys
+from pathlib import Path
 import torch
 import pulp
 import numpy as np
@@ -10,7 +13,9 @@ import networkx as nx
 from matplotlib.colors import ListedColormap
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon
-sys.path.append("..")
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.append(str(REPO_ROOT))
 from models import ResMLP
 from utilities import GeneralUtility
 
@@ -20,20 +25,48 @@ from utilities import GeneralUtility
 parser = argparse.ArgumentParser()
 parser.add_argument('--run_id', type=str, required=True)
 parser.add_argument('--eval_gridsize', type=int, default=512)
+parser.add_argument('--wandb_project', type=str, default=os.getenv("WANDB_PROJECT", "2DHadwigerNelson"))
+parser.add_argument('--wandb_entity', type=str, default=os.getenv("WANDB_ENTITY", "ais2t"))
+parser.add_argument('--config_json', type=str, default=None,
+                    help="Optional local config JSON. If provided, skips W&B config lookup.")
+parser.add_argument('--checkpoint_path', type=str, default=None,
+                    help="Optional local checkpoint path. If provided, skips W&B checkpoint download.")
 args = parser.parse_args()
 
 # ----------------------
-# Load W&B Run
+# Load run config + checkpoint
 # ----------------------
-api = wandb.Api()
-run = api.run(f"ais2t/2DHadwigerNelson/{args.run_id}")
+run_config = None
+checkpoint_path = args.checkpoint_path
 
-try:
-    checkpoint_file = 'step_32768_model.pt'
-    ckpt = run.file(checkpoint_file).download(root=f"./models/{args.run_id}", replace=True)
-except:
-    checkpoint_file = 'step_65536_model.pt'
-    ckpt = run.file(checkpoint_file).download(root=f"./models/{args.run_id}", replace=True)
+if args.config_json is not None:
+    with open(args.config_json, "r", encoding="utf-8") as f:
+        run_config = json.load(f)
+
+if run_config is None or checkpoint_path is None:
+    api = wandb.Api()
+    run = api.run(f"{args.wandb_entity}/{args.wandb_project}/{args.run_id}")
+    run_config = run.config
+
+    if checkpoint_path is None:
+        for checkpoint_file in ('trained_model.pt', 'step_32768_model.pt', 'step_65536_model.pt'):
+            try:
+                ckpt = run.file(checkpoint_file).download(root=f"./models/{args.run_id}", replace=True)
+                checkpoint_path = ckpt.name
+                break
+            except Exception:
+                continue
+
+if checkpoint_path is None:
+    local_candidates = [
+        f"./models/{args.run_id}/trained_model.pt",
+        f"./models/{args.run_id}/step_32768_model.pt",
+        f"./models/{args.run_id}/step_65536_model.pt",
+    ]
+    checkpoint_path = next((p for p in local_candidates if os.path.exists(p)), None)
+
+if checkpoint_path is None:
+    raise FileNotFoundError("Could not resolve checkpoint path from arguments, W&B, or local models directory.")
 
 
 # ----------------------
@@ -85,20 +118,20 @@ def plot_parallelogram_coloring(starts, values, v1, v2, N, filename):
 # Load Model
 # ----------------------
 device = "cuda" if torch.cuda.is_available() else "cpu"
-input_dim = run.config["dim"]
+input_dim = run_config["dim"]
 
-model = ResMLP(input_dim=input_dim, output_dim=run.config['n_colours'], device=device, **run.config["model"])
-model.load_state_dict(torch.load(ckpt.name, map_location=device))
+model = ResMLP(input_dim=input_dim, output_dim=run_config['n_colours'], device=device, **run_config["model"])
+model.load_state_dict(torch.load(checkpoint_path, map_location=device))
 model = model.to(device).eval()
 
-parallelogram = torch.tensor(run.config["training"]["parallelogram"], device=device)
+parallelogram = torch.tensor(run_config["training"]["parallelogram"], device=device)
 model = GeneralUtility.prepend_parallelogram_transformation(model, spanning_vectors=parallelogram)
 
 # ----------------------
 # Evaluate Model
 # ----------------------
 gridsize = args.eval_gridsize
-n_colours = run.config['n_colours']
+n_colours = run_config['n_colours']
 grid_bounds = (3, 3)
 
 grid_colours, conflicts_per_point, _ = GeneralUtility.evaluate_on_grid(
@@ -609,6 +642,7 @@ for (i,j) in active:
 
 
 # Save & plot
+os.makedirs("fixed_colorings", exist_ok=True)
 np.save(f"fixed_colorings/{args.run_id}_{gridsize}_IP_fixed.npy", opt_grid)
 
 final_coloring = opt_grid

@@ -9,6 +9,7 @@ __pycache__/
 # Ignore virtual environment directories
 venv/
 env/
+.venv/
 
 # Ignore IDE-specific files and directories
 .idea/

@@ -1,0 +1,26 @@
+[project]
+name = "agentic-almost-colorings"
+version = "0.1.0"
+description = "Research codebase for finding almost colorings of the plane"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "torch>=2.5.0",
+    "torchmetrics",
+    "wandb",
+    "pulp",
+    "networkx",
+    "matplotlib",
+    "tqdm",
+    "numpy",
+]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu124", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true

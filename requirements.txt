@@ -1,8 +1,4 @@
-torch
-torchmetrics
-wandb
-pulp
-networkx
-matplotlib
-tqdm
-numpy
+# Legacy pip requirements. Prefer uv: see README.md and pyproject.toml.
+#
+# GPU setup (Linux, default):
+#   uv sync

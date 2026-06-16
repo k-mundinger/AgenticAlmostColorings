@@ -14,6 +14,7 @@ from contextlib import contextmanager
 
 import torch
 import wandb
+from wandb.errors import Error as WandbError
 
 from runner import Runner
 from utilities import GeneralUtility
@@ -38,13 +39,13 @@ defaults = dict(
     # Training definition
     training=dict(
         # General
-        n_steps=20000,  # total number of parameter updates
+        n_steps=10000,  # total number of parameter updates
         batch_size=2048,  # Batch size for training
         grid_input_scale=1,  # Scale of the grid as how it is input to the network
         loss_fn="log_prob",
         grid_sizes=(6,6),  # Must be a tuple with the grid sizes for each dimension (var dim)
         p_norm=2,  # The norm that induces the distance w.r.t which we sample "unit distance" points
-        n_circle_points=32, # number of proximity points to sample for each colour
+        n_circle_points=8, # number of proximity points to sample for each colour
         temperature=0.0,  # circle-point aggregation: <0 hard max, 0 plain mean, >0 softmax-weighted
         good_coloring=True,  # for lagrangian term for last colour
         good_coloring_weight=0.01,
@@ -130,8 +131,14 @@ with tempdir() as tmp_dir:
     is_htc = 'htc-' in os.uname().nodename
     is_gcp = 'gpu' in os.uname().nodename and not is_htc
     if is_gcp:
-        print('Running on GCP, marking as preemptable.')
-        wandb.mark_preempting()  # Note: This potentially overwrites the config when a run is resumed -> problems with tmp_dir
+        # In disabled/offline modes, wandb.run may be unavailable.
+        # Guard this call so local pipelines can run without W&B.
+        if wandb.run is not None:
+            print('Running on GCP, marking as preemptable.')
+            try:
+                wandb.mark_preempting()  # Potentially overwrites config on resume.
+            except WandbError as e:
+                print(f'Skipping wandb.mark_preempting(): {e}')
 
     runner = Runner(config=config, tmp_dir=tmp_dir, debug=debug)
     runner.run()
@@ -154,6 +161,10 @@ with tempdir() as tmp_dir:
     wandb_dir_path = wandb.run.dir if wandb.run is not None else None
     wandb.join()
 
-    # Delete the local files
+    # Delete local W&B files if possible. In disabled/offline setups this path
+    # can be a protected shared tmp location; skip cleanup gracefully.
     if wandb_dir_path and os.path.exists(wandb_dir_path):
-        shutil.rmtree(wandb_dir_path)
+        try:
+            shutil.rmtree(wandb_dir_path)
+        except (OSError, PermissionError) as e:
+            sys.stderr.write(f"Skipping wandb dir cleanup ({wandb_dir_path}): {e}\n")

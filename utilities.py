@@ -7,8 +7,16 @@ from bisect import bisect_right
 import os
 from typing import Optional, Tuple
 
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.ticker import AutoMinorLocator, MultipleLocator
+
+
+def _discrete_cmap(name: str, n: int):
+    try:
+        return mpl.colormaps[name].resampled(n)
+    except AttributeError:
+        return plt.cm.get_cmap(name, n)
 import numpy as np
 import torch
 import wandb
@@ -381,7 +389,7 @@ class GeneralUtility:
         plt.subplot(131)
 
         plt.title("Coloring")
-        plt.pcolor(x_array, y_array, grid_colours.cpu(), cmap=plt.cm.get_cmap("Pastel1", n_colours), vmin=0, vmax=n_colours - 1)
+        plt.pcolor(x_array, y_array, grid_colours.cpu(), cmap=_discrete_cmap("Pastel1", n_colours), vmin=0, vmax=n_colours - 1)
         ax = plt.gca()
         ax.set_aspect('equal')
 
@@ -415,7 +423,7 @@ class GeneralUtility:
 
         num_conflicting_points = conflicts_mask.cpu().sum()
         plt.title(f"Points with conflicts (Ratio = {num_conflicting_points / gridsize ** 2:.06f})")
-        plt.pcolor(x_array, y_array, conflicts_mask.cpu(), cmap=plt.cm.get_cmap("binary", 2), vmin=0, vmax=1)
+        plt.pcolor(x_array, y_array, conflicts_mask.cpu(), cmap=_discrete_cmap("binary", 2), vmin=0, vmax=1)
         #plt.colorbar(drawedges=True, location=cbar_location, shrink=shrink)
         ax = plt.gca()
         ax.set_aspect('equal')
@@ -475,7 +483,7 @@ class GeneralUtility:
         plt.subplot(131)
 
         plt.title("Coloring")
-        plt.pcolor(x_array, y_array, grid_colours.cpu(), cmap=plt.cm.get_cmap("Pastel1", n_colours), vmin=0, vmax=n_colours - 1)
+        plt.pcolor(x_array, y_array, grid_colours.cpu(), cmap=_discrete_cmap("Pastel1", n_colours), vmin=0, vmax=n_colours - 1)
         ax = plt.gca()
         ax.set_aspect('equal')
 
@@ -524,7 +532,7 @@ class GeneralUtility:
         plot_mask[last_color_mask] = 2.
         num_conflicting_points = conflicts_mask.cpu().sum()
         plt.title(f"Conflicts ratio = {num_conflicting_points / gridsize ** 2:.06f}, Last colour ratio: {last_color_mask.cpu().sum() / gridsize ** 2:.06f}")
-        plt.pcolor(x_array, y_array, plot_mask.cpu(), cmap=plt.cm.get_cmap("rainbow", 3), vmin=0, vmax=2)
+        plt.pcolor(x_array, y_array, plot_mask.cpu(), cmap=_discrete_cmap("rainbow", 3), vmin=0, vmax=2)
         #plt.colorbar(drawedges=True, location=cbar_location, shrink=shrink)
         ax = plt.gca()
         ax.set_aspect('equal')

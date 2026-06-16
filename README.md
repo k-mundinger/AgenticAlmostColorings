@@ -37,15 +37,27 @@ The values in this table correspond to known continuous analytical/geometric con
 ## Getting Started & Offline Running
 
 ### Setup
-Install the required packages:
+
+This project uses [uv](https://docs.astral.sh/uv/) for dependency management. PyTorch is installed from PyTorch's CUDA 12.4 wheel index (`cu124`), matching drivers that report CUDA 12.4 in `nvidia-smi`.
+
+**Prerequisites:** [uv](https://docs.astral.sh/uv/getting-started/installation/) and an NVIDIA GPU. Check your driver's max CUDA version with `nvidia-smi` (top-right "CUDA Version" line). If it differs from 12.4, edit the `pytorch-cu124` index in `pyproject.toml` (e.g. `cu126`, `cu128`) and re-run `uv sync --extra cuda`.
+
 ```bash
-pip install -r requirements.txt
+# One-time setup: create .venv and install dependencies (GPU PyTorch on Linux)
+uv sync
+
+# Verify GPU PyTorch
+uv run python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 ```
+
+If you need a different CUDA version, edit the `pytorch-cu124` index in `pyproject.toml` (e.g. `cu126`, `cu128`, `cu130`) and re-run `uv sync`. See [uv's PyTorch guide](https://docs.astral.sh/uv/guides/integration/pytorch/) for details.
+
+For CPU-only development (no GPU), change the `pytorch-cu124` index in `pyproject.toml` to `pytorch-cpu` and re-run `uv sync`.
 
 ### Running Training
 To start a training run:
 ```bash
-python main.py --debug
+uv run python main.py --debug
 ```
 *Note: In debug mode (`--debug` in arguments), default parameters are used and a short runs/sweeps profile is executed. Without `--debug`, all config fields default to `None` for hyperparameter sweeps.*
 
@@ -61,9 +73,25 @@ export WANDB_MODE=disabled
 python main.py --debug
 ```
 
+### Unified Local Pipeline (Train + ILP Verify)
+Use the single pipeline command to train and then verify on a coarse grid (default `32x32`):
+```bash
+python run_pipeline.py
+```
+
+Useful flags:
+```bash
+# Keep W&B optional: disabled by default, enable only when needed
+python run_pipeline.py --use-wandb
+
+# Change training command or verification grid size
+python run_pipeline.py --train-command "python main.py --debug" --eval-gridsize 32
+```
+
 ### Persistent Local Checkpoints
-When a training run completes, the trained model, config, and plots are automatically copied from the temporary directory to the persistent path:
+When a training run completes, the trained model and plots are automatically copied from the temporary directory to the persistent path:
 `./models/{run_id}/`
+When using `run_pipeline.py`, a `pipeline_config.json` snapshot is also saved in the same run directory for local verification.
 This ensures your results survive tempdir cleanup, making it easy to run evaluation scripts locally.
 
 ### Custom W&B Settings
@@ -89,11 +117,11 @@ python main.py --debug
 ## Tasks
 
 ### Onboarding Task (Highly Recommended First Step)
-* [ ] **Build a unified local pipeline script** (e.g. `run_pipeline.py`) that handles the end-to-end training and evaluation loop. It should:
+* [x] **Build a unified local pipeline script** (`run_pipeline.py`) that handles the end-to-end training and evaluation loop. It:
   1. Trigger a training run (with custom configuration) and save the checkpoint.
   2. Parse the resulting run ID and configuration.
   3. Automatically run the discrete coloring MILP solver (`verify_paralellogram_ip.py`) on the trained checkpoint.
-  4. Output the final, verified bonus color percentage.
+  4. Outputs the final, verified bonus color percentage.
   *This gives the agent a single, frictionless command to evaluate any code or hyperparameter changes instantly.*
 
 ### Core Research Tasks
