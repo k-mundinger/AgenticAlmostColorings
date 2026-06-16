@@ -1,3 +1,7 @@
+"""
+(Old) greedy version of solving the ILP. Kept for reference.
+"""
+
 import argparse
 from pathlib import Path
 import sys
