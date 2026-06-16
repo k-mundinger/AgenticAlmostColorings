@@ -54,52 +54,81 @@ If you need a different CUDA version, edit the `pytorch-cu124` index in `pyproje
 
 For CPU-only development (no GPU), change the `pytorch-cu124` index in `pyproject.toml` to `pytorch-cpu` and re-run `uv sync`.
 
-### Running Training
-To start a training run:
+### End-to-end pipeline (`run_pipeline.py`)
+
+**Start here.** `run_pipeline.py` is the single entry point for training and evaluation. Read it first (~200 lines) to see how the codebase fits together — it orchestrates the full loop and shows exactly which scripts, configs, and artifacts connect at each step.
+
+```bash
+uv run python run_pipeline.py
+```
+
+The pipeline runs four stages in order:
+
+1. **Train** — runs `main.py` (default: `python main.py --debug`). `main.py` builds the config, starts a W&B run (or runs with `WANDB_MODE=disabled`), and delegates to `Runner` in `runner.py` for the periodic parallelogram-constrained training loop. On completion, all outputs are copied from a temp directory to `./models/{run_id}/` (checkpoint, plots, etc.).
+2. **Resolve run** — parses the new `run_id` from training stdout (or falls back to the newest directory under `models/`).
+3. **Snapshot config** — loads the `defaults` dict from `main.py`, optionally merges `--config-overrides-json`, and writes `models/{run_id}/pipeline_config.json` so verification can run fully offline.
+4. **Verify (Step 5 MILP)** — invokes `scripts/verify_paralellogram_ip.py` with the local checkpoint, config snapshot, and `--eval-gridsize` (default `32`). The verifier discretizes the parallelogram, samples colors from the trained network, and solves an ILP to minimize bonus-color density. It prints the final **verified bonus color percentage** and saves artifacts under `fixed_colorings/`.
+
+```
+run_pipeline.py
+    │
+    ├─► main.py ──► runner.py          (train p_θ, save checkpoint)
+    │       └─► models/{run_id}/       (trained_model.pt, plots, …)
+    │
+    └─► scripts/verify_paralellogram_ip.py   (discretize + MILP fix)
+            └─► fixed_colorings/       (coloring PDF/PNG, .npy, CSV log)
+```
+
+**Key files to read when changing behavior:**
+
+| File | Role |
+| :--- | :--- |
+| `run_pipeline.py` | Orchestration, CLI flags, wiring between train and verify |
+| `main.py` | Default hyperparameters (`defaults` dict), W&B setup, persistent model save |
+| `runner.py` | Training loop, parallelogram basis, optimizer schedule |
+| `scripts/verify_paralellogram_ip.py` | Step 5: discrete coloring + ILP/MILP bonus-color minimization |
+
+Useful flags:
+```bash
+# W&B is disabled by default; enable only when you need cloud logging
+uv run python run_pipeline.py --use-wandb
+
+# Custom training command or finer verification grid
+uv run python run_pipeline.py --train-command "python main.py --debug" --eval-gridsize 512
+
+# Override config fields for verification without editing main.py
+uv run python run_pipeline.py --config-overrides-json my_overrides.json
+```
+
+When evaluating code or hyperparameter changes, prefer `run_pipeline.py` over calling `main.py` and the verifier separately — it is the canonical way to get a comparable verified bonus-color percentage.
+
+### Training only (`main.py`)
+To run training without verification:
 ```bash
 uv run python main.py --debug
 ```
 *Note: In debug mode (`--debug` in arguments), default parameters are used and a short runs/sweeps profile is executed. Without `--debug`, all config fields default to `None` for hyperparameter sweeps.*
 
+Checkpoints and plots are saved to `./models/{run_id}/` when the run completes.
+
 ### Local & Offline Runs
-You do not need a connection to the Weights & Biases (W&B) cloud to run this code. You can disable W&B logging or run offline:
+You do not need a connection to the Weights & Biases (W&B) cloud to run this code. `run_pipeline.py` sets `WANDB_MODE=disabled` by default. For standalone training:
 ```bash
 # Run completely offline (W&B metadata and runs are saved locally)
 export WANDB_MODE=offline
-python main.py --debug
+uv run python main.py --debug
 
 # Disable W&B entirely
 export WANDB_MODE=disabled
-python main.py --debug
+uv run python main.py --debug
 ```
-
-### Unified Local Pipeline (Train + ILP Verify)
-Use the single pipeline command to train and then verify on a coarse grid (default `32x32`):
-```bash
-python run_pipeline.py
-```
-
-Useful flags:
-```bash
-# Keep W&B optional: disabled by default, enable only when needed
-python run_pipeline.py --use-wandb
-
-# Change training command or verification grid size
-python run_pipeline.py --train-command "python main.py --debug" --eval-gridsize 32
-```
-
-### Persistent Local Checkpoints
-When a training run completes, the trained model and plots are automatically copied from the temporary directory to the persistent path:
-`./models/{run_id}/`
-When using `run_pipeline.py`, a `pipeline_config.json` snapshot is also saved in the same run directory for local verification.
-This ensures your results survive tempdir cleanup, making it easy to run evaluation scripts locally.
 
 ### Custom W&B Settings
 If you do want to log to your own W&B account, set these environment variables before running:
 ```bash
 export WANDB_PROJECT="your-project-name"
 export WANDB_ENTITY="your-username"
-python main.py --debug
+uv run python main.py --debug
 ```
 
 ---
@@ -115,14 +144,6 @@ python main.py --debug
 * **Generalizing to 3D:** Once 2D coloring improves, generalize and apply the same pipeline to 3D (starting from `scripts/verify_parallelogram_3d_speedup.py`).
 
 ## Tasks
-
-### Onboarding Task (Highly Recommended First Step)
-* [x] **Build a unified local pipeline script** (`run_pipeline.py`) that handles the end-to-end training and evaluation loop. It:
-  1. Trigger a training run (with custom configuration) and save the checkpoint.
-  2. Parse the resulting run ID and configuration.
-  3. Automatically run the discrete coloring MILP solver (`verify_paralellogram_ip.py`) on the trained checkpoint.
-  4. Outputs the final, verified bonus color percentage.
-  *This gives the agent a single, frictionless command to evaluate any code or hyperparameter changes instantly.*
 
 ### Core Research Tasks
 * [ ] Find an almost 5-coloring with less than **3.74%** of the pixels covered by the bonus color (color index 5) on any discretization grid.
