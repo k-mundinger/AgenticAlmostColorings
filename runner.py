@@ -44,6 +44,13 @@ class Runner:
         self.tmp_dir = tmp_dir      
         self.metrics = {'train': {'loss': MeanMetric().to(device=self.device)}}
         self.effective_batch_size = self.config.training['batch_size']
+        self.enable_wandb_logging = self._metric_flag("enable_wandb_logging", True)
+        self.enable_eval = self._metric_flag("enable_eval", True)
+        self.enable_plots = self._metric_flag("enable_plots", True)
+        self.save_intermediate_models = self._metric_flag("save_intermediate_models", True)
+        self.sync_models_to_wandb = self._metric_flag("sync_models_to_wandb", True)
+        self.save_final_model = self._metric_flag("save_final_model", True)
+        self.loss_log_every_k_steps = self._metric_int("loss_log_every_k_steps", 1000)
 
         # Variables to be set
         self.problem = None
@@ -51,6 +58,20 @@ class Runner:
         self.problem_metrics = {}
 
         sys.stdout.write(f"Using temporary directory {self.tmp_dir}.\n")
+
+    def _metric_flag(self, key: str, default: bool) -> bool:
+        metrics_config = getattr(self.config, "metrics", None)
+        if metrics_config is None:
+            return default
+        value = metrics_config.get(key, default) if hasattr(metrics_config, "get") else getattr(metrics_config, key, default)
+        return default if value is None else bool(value)
+
+    def _metric_int(self, key: str, default: int) -> int:
+        metrics_config = getattr(self.config, "metrics", None)
+        if metrics_config is None:
+            return default
+        value = metrics_config.get(key, default) if hasattr(metrics_config, "get") else getattr(metrics_config, key, default)
+        return default if value is None else int(value)
 
     def reset_averaged_metrics(self):
         """Resets all metrics"""
@@ -164,6 +185,9 @@ class Runner:
         """
         Logs the current training status.
         """
+        if not self.enable_wandb_logging or wandb.run is None:
+            return
+
         loggingDict = self.get_metrics()
 
         # Log and push to Wandb
@@ -186,8 +210,15 @@ class Runner:
         """
         Main training loop in the parametric setting, i.e. where we sample from predefined intervals and update.
         """
-        self.problem_metrics = self.problem.get_metrics()
-        self.log(step=0)
+        if self.enable_eval:
+            self.problem_metrics = self.problem.get_metrics()
+            self.log(step=0)
+        else:
+            self.problem_metrics = {}
+        loss_log_path = os.path.join(self.tmp_dir, "train_losses.csv")
+        if self.loss_log_every_k_steps > 0:
+            with open(loss_log_path, "w", encoding="utf-8") as f:
+                f.write("step,loss,learning_rate\n")
         self.reset_averaged_metrics()
 
         for step in tqdm(range(1, self.config.training['n_steps'] + 1, 1)):
@@ -218,6 +249,18 @@ class Runner:
             
             # Update the metrics
             self.metrics['train']['loss'](value=loss, weight=self.effective_batch_size)
+            if self.loss_log_every_k_steps > 0 and (
+                step % self.loss_log_every_k_steps == 0
+                or step == self.config.training['n_steps']
+            ):
+                loss_value = float(loss.detach().cpu())
+                learning_rate = float(self.optimizer.param_groups[0]['lr'])
+                with open(loss_log_path, "a", encoding="utf-8") as f:
+                    f.write(f"{step},{loss_value:.10f},{learning_rate:.10g}\n")
+                sys.stdout.write(
+                    f"step={step} loss={loss_value:.8f} lr={learning_rate:.6g}\n"
+                )
+                sys.stdout.flush()
 
             is_last_step = step == self.config.training['n_steps']
             log_imgs_every = self.config.metrics['log_imgs_every_k_steps']
@@ -225,16 +268,16 @@ class Runner:
             log_model_every = self.config.metrics['log_model_every_k_steps']
 
             # --- logging schedule (edit conditions here) ---
-            log_imgs = self.problem.dim == 2 and (
+            log_imgs = self.enable_plots and self.problem.dim == 2 and (
                 step == 1
                 or step % log_imgs_every == 0
                 or is_last_step
             )
-            log_metrics = (
+            log_metrics = self.enable_eval and (
                 step % log_metrics_every == 0
                 or is_last_step
             )
-            log_model = (
+            log_model = self.save_intermediate_models and (
                 step % log_model_every == 0
                 or is_last_step
             )
@@ -262,20 +305,21 @@ class Runner:
                         n_circle_points=self.config["metrics"]["n_circle_points"],
                         n_colours=self.config["n_colours"],
                     )
-                    wandb.log(
-                        self._parallelogram_log_dict(parallelogram, parallelogram_eval),
-                        step=step,
-                    )
+                    if self.enable_wandb_logging and wandb.run is not None:
+                        wandb.log(
+                            self._parallelogram_log_dict(parallelogram, parallelogram_eval),
+                            step=step,
+                        )
 
             if log_model:
                 GeneralUtility.save_model(
                     model=self.problem.model,
                     model_identifier=f'step_{step}',
                     tmp_dir=self.tmp_dir,
-                    sync=True,
+                    sync=self.sync_models_to_wandb and self.enable_wandb_logging,
                 )
 
-        if self.config["training"]["parallelogram"] is not None:
+        if self.enable_eval and self.config["training"]["parallelogram"] is not None:
             final_step = self.config.training['n_steps']
             parallelogram = torch.linalg.inv(self.problem.model.inv_transf_matrix.detach())
             parallelogram_eval = GeneralUtility.get_parallelogram_eval(
@@ -285,15 +329,20 @@ class Runner:
                 n_circle_points=self.config["metrics"]["n_circle_points"],
                 n_colours=self.config["n_colours"],
             )
-            wandb.log(
-                self._parallelogram_log_dict(parallelogram, parallelogram_eval),
-                step=final_step,
-            )
+            if self.enable_wandb_logging and wandb.run is not None:
+                wandb.log(
+                    self._parallelogram_log_dict(parallelogram, parallelogram_eval),
+                    step=final_step,
+                )
 
     def run(self):
         """Controls the execution of the script."""
         # We start training from scratch
-        self.seed = int((os.getpid() + 1) * time.time()) % 2 ** 32
+        configured_seed = self.config.get("seed", None) if hasattr(self.config, "get") else getattr(self.config, "seed", None)
+        if configured_seed is None:
+            self.seed = int((os.getpid() + 1) * time.time()) % 2 ** 32
+        else:
+            self.seed = int(configured_seed)
         GeneralUtility.set_seed(seed=self.seed)  # Set the seed
 
         # Define problem
@@ -308,6 +357,11 @@ class Runner:
         # Train    
         self.train()
 
-        # Save the trained model and upload it to wandb
-        GeneralUtility.save_model(model=self.problem.model, model_identifier='trained', tmp_dir=self.tmp_dir, sync=True)
-
+        # Save the trained model locally, and optionally upload it to W&B.
+        if self.save_final_model:
+            GeneralUtility.save_model(
+                model=self.problem.model,
+                model_identifier='trained',
+                tmp_dir=self.tmp_dir,
+                sync=self.sync_models_to_wandb and self.enable_wandb_logging,
+            )

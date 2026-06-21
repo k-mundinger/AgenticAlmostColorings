@@ -28,6 +28,10 @@ from utilities import GeneralUtility
 parser = argparse.ArgumentParser()
 parser.add_argument('--run_id', type=str, required=True)
 parser.add_argument('--eval_gridsize', type=int, default=512)
+parser.add_argument('--eval_gridheight', type=int, default=None,
+                    help="Optional number of subdivisions along the first parallelogram vector.")
+parser.add_argument('--eval_gridwidth', type=int, default=None,
+                    help="Optional number of subdivisions along the second parallelogram vector.")
 parser.add_argument('--wandb_project', type=str, default=os.getenv("WANDB_PROJECT", "2DHadwigerNelson"))
 parser.add_argument('--wandb_entity', type=str, default=os.getenv("WANDB_ENTITY", "ais2t"))
 parser.add_argument('--config_json', type=str, default=None,
@@ -129,11 +133,11 @@ def get_cmap():
 
     return pastel_cmap
 
-def plot_parallelogram_coloring(starts, values, v1, v2, N, filename):
+def plot_parallelogram_coloring(starts, values, v1, v2, H, W, filename):
 
-    dv1 = v1.cpu() / N
-    dv2 = v2.cpu() / N
-    starts = starts.reshape(N*N, 2).cpu()
+    dv1 = v1.cpu() / H
+    dv2 = v2.cpu() / W
+    starts = starts.reshape(H * W, 2).cpu()
     values = values.flatten()
     
     cmap = get_cmap()
@@ -209,7 +213,7 @@ def _resolve_mask_cache_dir():
     return output_dir.parent / "mask_cache"
 
 
-def _mask_cache_path(parallelogram, N, radius):
+def _mask_cache_path(parallelogram, H, W, radius):
     cache_dir = _resolve_mask_cache_dir()
     if cache_dir is None:
         return None
@@ -217,26 +221,28 @@ def _mask_cache_path(parallelogram, N, radius):
     cache_dir.mkdir(parents=True, exist_ok=True)
     key_data = [
         np.asarray(parallelogram.detach().cpu().numpy(), dtype=np.float32).tobytes(),
-        str(N).encode("ascii"),
+        str(H).encode("ascii"),
+        str(W).encode("ascii"),
         repr(float(radius)).encode("ascii"),
     ]
     digest = hashlib.sha256(b"|".join(key_data)).hexdigest()[:20]
-    return cache_dir / f"base_mask_{N}_{digest}.npy"
+    return cache_dir / f"base_mask_{H}x{W}_{digest}.npy"
 
 
-def compute_base_mask_vec(parallelogram, N, radius=1.0, device='cpu'):
+def compute_base_mask_vec(parallelogram, H, W, radius=1.0, device='cpu'):
     v1, v2 = parallelogram[0], parallelogram[1]
-    lin = torch.linspace(0, 1, N + 1, device=device, dtype=v1.dtype)[:-1]
-    a, b = torch.meshgrid(lin, lin, indexing='ij')
-    starts_grid = a.unsqueeze(-1) * v1 + b.unsqueeze(-1) * v2  # [N, N, 2]
+    lin_h = torch.linspace(0, 1, H + 1, device=device, dtype=v1.dtype)[:-1]
+    lin_w = torch.linspace(0, 1, W + 1, device=device, dtype=v1.dtype)[:-1]
+    a, b = torch.meshgrid(lin_h, lin_w, indexing='ij')
+    starts_grid = a.unsqueeze(-1) * v1 + b.unsqueeze(-1) * v2  # [H, W, 2]
 
-    cache_path = _mask_cache_path(parallelogram, N, radius)
+    cache_path = _mask_cache_path(parallelogram, H, W, radius)
     if cache_path is not None and cache_path.exists():
         base_mask = np.load(cache_path).astype(np.int64, copy=False).tolist()
         print(f"Loaded cached base mask from {cache_path}")
         return starts_grid.reshape(-1, 2).cpu(), base_mask
 
-    dv1, dv2 = v1/N, v2/N
+    dv1, dv2 = v1 / H, v2 / W
     corner_offs = torch.stack([
         torch.zeros(2, device=device),
         dv1,
@@ -253,7 +259,7 @@ def compute_base_mask_vec(parallelogram, N, radius=1.0, device='cpu'):
     radius_sq = radius * radius
 
     for tile_offset in tile_offsets:
-        tile_partial = torch.zeros((N, N), dtype=torch.bool, device=device)
+        tile_partial = torch.zeros((H, W), dtype=torch.bool, device=device)
         shift = tile_offset[0] * v1 + tile_offset[1] * v2
         corners = starts_grid.unsqueeze(0) + shift + corner_offs[:, None, None, :]
         for center in corner_offs:
@@ -269,16 +275,32 @@ def compute_base_mask_vec(parallelogram, N, radius=1.0, device='cpu'):
 
     return starts_grid.reshape(-1, 2).cpu(), base_mask
 
+grid_height = args.eval_gridheight if args.eval_gridheight is not None else args.eval_gridsize
+grid_width = args.eval_gridwidth if args.eval_gridwidth is not None else args.eval_gridsize
+if grid_height <= 0 or grid_width <= 0:
+    raise ValueError(f"Grid dimensions must be positive, got {grid_height}x{grid_width}")
+gridsize = args.eval_gridsize
+grid_shape_label = (
+    str(gridsize)
+    if grid_height == gridsize and grid_width == gridsize
+    else f"{grid_height}x{grid_width}"
+)
+print(
+    f"Verifier grid shape: {grid_height}x{grid_width} "
+    f"({grid_height * grid_width} cells)",
+    flush=True,
+)
+
 #starts, base_mask = compute_base_mask(parallelogram.cpu(), gridsize)
 mask_start = perf_counter()
-starts, base_mask = compute_base_mask_vec(parallelogram, gridsize, device=device)
+starts, base_mask = compute_base_mask_vec(parallelogram, grid_height, grid_width, device=device)
 print(f"Prepared base mask and grid starts in {perf_counter() - mask_start:.2f}s", flush=True)
 
-starts_reshaped = starts.reshape(gridsize, gridsize, -1)
+starts_reshaped = starts.reshape(grid_height, grid_width, -1)
 model_eval_start = perf_counter()
 with torch.no_grad():
     outputs = model(starts.to(device)).argmax(dim=1).cpu()
-    grid_coloring = outputs.reshape(gridsize, gridsize).numpy()
+    grid_coloring = outputs.reshape(grid_height, grid_width).numpy()
 print(f"Evaluated model on verifier grid in {perf_counter() - model_eval_start:.2f}s", flush=True)
 
 
@@ -421,7 +443,7 @@ print(f"Computed base mask. {len(base_mask)=}, {base_mask[0]=}, mask_offsets={ma
 
 if args.neighbor_backend == "fft":
     kernel_start = perf_counter()
-    mask_kernel = build_fft_mask_kernel(mask_offsets, gridsize, gridsize, device)
+    mask_kernel = build_fft_mask_kernel(mask_offsets, grid_height, grid_width, device)
     pad = None
     print(f"Computed FFT mask kernel. {mask_kernel.shape=} in {perf_counter() - kernel_start:.2f}s", flush=True)
 else:
@@ -1222,7 +1244,7 @@ for (i, j), chosen in chosen_by_node.items():
 # Save & plot
 fixed_colorings_dir = output_dir / "fixed_colorings"
 fixed_colorings_dir.mkdir(parents=True, exist_ok=True)
-np.save(fixed_colorings_dir / f"{args.run_id}_{gridsize}_IP_fixed.npy", opt_grid)
+np.save(fixed_colorings_dir / f"{args.run_id}_{grid_shape_label}_IP_fixed.npy", opt_grid)
 
 final_coloring = opt_grid
 
@@ -1283,9 +1305,9 @@ def save_fixed_fraction(run_id, eval_gridsize, fraction_fixed, csv_filename='ver
         writer.writerow(data)
 
 fraction_fixed = (final_coloring == 5).sum() / (H * W)
-save_fixed_fraction(args.run_id, gridsize, fraction_fixed, csv_filename=str(output_dir / 'verified_paralellograms_ip.csv'))
+save_fixed_fraction(args.run_id, grid_shape_label, fraction_fixed, csv_filename=str(output_dir / 'verified_paralellograms_ip.csv'))
 
 if not args.no_plot:
-    plot_filename = fixed_colorings_dir / f"{args.run_id}_{gridsize}_fixed.png" if H > 100 else fixed_colorings_dir / f"{args.run_id}_{gridsize}_fixed.pdf"
+    plot_filename = fixed_colorings_dir / f"{args.run_id}_{grid_shape_label}_fixed.png" if H * W > 10000 else fixed_colorings_dir / f"{args.run_id}_{grid_shape_label}_fixed.pdf"
 
-    plot_parallelogram_coloring(starts_reshaped, final_coloring, parallelogram[0], parallelogram[1], gridsize, plot_filename)
+    plot_parallelogram_coloring(starts_reshaped, final_coloring, parallelogram[0], parallelogram[1], H, W, plot_filename)

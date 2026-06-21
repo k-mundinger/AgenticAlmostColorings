@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 
-RUN_DIR_RE = re.compile(r"Saved persistent local copy of all outputs to models/([A-Za-z0-9_-]+)")
+RUN_DIR_RE = re.compile(r"Saved persistent local copy of all outputs to (.+)\.")
 BONUS_FRAC_RE = re.compile(r"Fraction set to bonus color:\s*([0-9.]+)%")
 
 
@@ -21,7 +21,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--train-command",
-        default="python main.py --debug",
+        default="python main.py --debug --fast-train",
         help="Training command to execute.",
     )
     parser.add_argument(
@@ -50,6 +50,97 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional JSON file merged into local default config before verification.",
     )
+    parser.add_argument(
+        "--verify-output-root",
+        default=None,
+        help="Optional root directory for verifier artifacts. Defaults to the run directory.",
+    )
+    parser.add_argument(
+        "--no-plot",
+        action="store_true",
+        help="Skip final verifier plot generation.",
+    )
+    parser.add_argument(
+        "--solver-time-limit",
+        type=int,
+        default=360000,
+        help="CBC solver time limit in seconds.",
+    )
+    parser.add_argument(
+        "--solver-threads",
+        type=int,
+        default=1,
+        help="Number of CBC solver threads for verifier MILPs.",
+    )
+    parser.add_argument(
+        "--solver-backend",
+        choices=("cbc", "scip", "cp_sat"),
+        default="cbc",
+        help="Verifier component solver backend.",
+    )
+    parser.add_argument(
+        "--solver-gap-abs",
+        type=float,
+        default=None,
+        help="Absolute MIP optimality gap for verifier solvers.",
+    )
+    parser.add_argument(
+        "--solver-gap-rel",
+        type=float,
+        default=None,
+        help="Relative MIP optimality gap for verifier solvers.",
+    )
+    parser.add_argument(
+        "--solver-max-nodes",
+        type=int,
+        default=None,
+        help="Maximum branch-and-bound nodes for verifier MIP solvers.",
+    )
+    parser.add_argument(
+        "--cbc-cuts",
+        choices=("default", "on", "off"),
+        default="default",
+        help="CBC cut generation setting.",
+    )
+    parser.add_argument(
+        "--cbc-presolve",
+        choices=("default", "on", "off"),
+        default="default",
+        help="CBC presolve setting.",
+    )
+    parser.add_argument(
+        "--cbc-strong",
+        type=int,
+        default=None,
+        help="CBC strong branching candidate count.",
+    )
+    parser.add_argument(
+        "--scip-path",
+        default=os.getenv("SCIP_PATH", "/software/opt-sw/scipoptsuite-10.0.2/bin/scip"),
+        help="Path to SCIP executable when --solver-backend=scip.",
+    )
+    parser.add_argument(
+        "--neighbor-backend",
+        choices=("fft", "conv"),
+        default="fft",
+        help="Verifier neighbor-query backend.",
+    )
+    parser.add_argument(
+        "--mask-cache-dir",
+        default=None,
+        help="Optional shared verifier base-mask cache directory.",
+    )
+    parser.add_argument(
+        "--skip-vertex-cover",
+        action="store_true",
+        help="Let the MILP handle all remaining conflicted cells instead of using the vertex-cover pre-repair.",
+    )
+    parser.add_argument(
+        "--active-edge-chunk-size",
+        type=int,
+        default=64,
+        help="Verifier mask-offset chunk size for vectorized active-edge discovery.",
+    )
     return parser.parse_args()
 
 
@@ -69,20 +160,20 @@ def run_command(command: List[str], env: Dict[str, str]) -> Tuple[int, str]:
     return proc.wait(), "".join(output_lines)
 
 
-def parse_run_id(training_output: str, preexisting_runs: set[str], models_dir: Path) -> Optional[str]:
+def parse_run_dir(training_output: str, preexisting_runs: set[str], models_dir: Path) -> Optional[Path]:
     match = RUN_DIR_RE.search(training_output)
     if match:
-        return match.group(1)
+        return Path(match.group(1).strip())
 
     current_runs = {p.name for p in models_dir.iterdir() if p.is_dir()} if models_dir.exists() else set()
     new_runs = sorted(current_runs - preexisting_runs)
     if new_runs:
         newest = max((models_dir / run_id for run_id in new_runs), key=lambda p: p.stat().st_mtime)
-        return newest.name
+        return newest
 
     if current_runs:
         newest = max((models_dir / run_id for run_id in current_runs), key=lambda p: p.stat().st_mtime)
-        return newest.name
+        return newest
     return None
 
 
@@ -132,27 +223,32 @@ def main() -> int:
     train_cmd = shlex.split(args.train_command)
     train_rc, train_output = run_command(train_cmd, env=train_env)
 
-    run_id = parse_run_id(train_output, preexisting_runs, models_dir)
+    run_dir = parse_run_dir(train_output, preexisting_runs, models_dir)
+    run_id = run_dir.name if run_dir is not None else None
     print(f"[pipeline] Training exit code: {train_rc}")
     print(f"[pipeline] Parsed run_id: {run_id or 'unknown'}")
 
-    if run_id is None:
+    if run_dir is None or run_id is None:
         print("[pipeline] Could not detect run_id. Stopping before verifier.")
         return 1
 
-    run_dir = models_dir / run_id
     checkpoint = resolve_checkpoint(run_dir)
     if checkpoint is None:
         print(f"[pipeline] No checkpoint found in {run_dir}.")
         return 1
 
-    config = load_defaults_from_main(repo_root / "main.py")
+    run_config_path = run_dir / "pipeline_config.json"
+    if run_config_path.exists():
+        with open(run_config_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+    else:
+        config = load_defaults_from_main(repo_root / "main.py")
+
     if args.config_overrides_json:
         with open(args.config_overrides_json, "r", encoding="utf-8") as f:
             overrides = json.load(f)
         deep_update(config, overrides)
 
-    run_config_path = run_dir / "pipeline_config.json"
     with open(run_config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2)
 
@@ -168,6 +264,11 @@ def main() -> int:
         ),
     )
 
+    if args.verify_output_root:
+        verify_output_dir = Path(args.verify_output_root) / f"{run_id}_grid{args.eval_gridsize}"
+    else:
+        verify_output_dir = run_dir / f"verification_grid{args.eval_gridsize}"
+
     verify_cmd = [
         sys.executable,
         "scripts/verify_paralellogram_ip.py",
@@ -179,7 +280,39 @@ def main() -> int:
         str(checkpoint),
         "--config_json",
         str(run_config_path),
+        "--output_dir",
+        str(verify_output_dir),
+        "--solver_time_limit",
+        str(args.solver_time_limit),
+        "--solver_threads",
+        str(args.solver_threads),
+        "--solver_backend",
+        args.solver_backend,
+        "--scip_path",
+        args.scip_path,
+        "--cbc_cuts",
+        args.cbc_cuts,
+        "--cbc_presolve",
+        args.cbc_presolve,
+        "--neighbor_backend",
+        args.neighbor_backend,
+        "--active_edge_chunk_size",
+        str(args.active_edge_chunk_size),
     ]
+    if args.solver_gap_abs is not None:
+        verify_cmd += ["--solver_gap_abs", str(args.solver_gap_abs)]
+    if args.solver_gap_rel is not None:
+        verify_cmd += ["--solver_gap_rel", str(args.solver_gap_rel)]
+    if args.solver_max_nodes is not None:
+        verify_cmd += ["--solver_max_nodes", str(args.solver_max_nodes)]
+    if args.cbc_strong is not None:
+        verify_cmd += ["--cbc_strong", str(args.cbc_strong)]
+    if args.mask_cache_dir:
+        verify_cmd += ["--mask_cache_dir", args.mask_cache_dir]
+    if args.skip_vertex_cover:
+        verify_cmd.append("--skip_vertex_cover")
+    if args.no_plot:
+        verify_cmd.append("--no_plot")
     if args.use_wandb:
         verify_cmd += ["--wandb_project", args.wandb_project, "--wandb_entity", args.wandb_entity]
 

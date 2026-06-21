@@ -33,7 +33,8 @@ class GeneralUtility:
         Sets the seed for the current run.
         :param seed: seed to be used
         """
-        wandb.config.update({'seed': seed})  # Push the seed to wandb
+        if wandb.run is not None:
+            wandb.config.update({'seed': seed})  # Push the seed to wandb
 
         # Set a unique random seed
         np.random.seed(seed)
@@ -592,4 +593,3 @@ class Sin(torch.nn.Module):
 
     def forward(self, forward_input: torch.Tensor) -> torch.Tensor:
         return torch.sin(forward_input)
-

@@ -64,7 +64,7 @@ uv run python run_pipeline.py
 
 The pipeline runs four stages in order:
 
-1. **Train** — runs `main.py` (default: `python main.py --debug`). `main.py` builds the config, starts a W&B run (or runs with `WANDB_MODE=disabled`), and delegates to `Runner` in `runner.py` for the periodic parallelogram-constrained training loop. On completion, all outputs are copied from a temp directory to `./models/{run_id}/` (checkpoint, plots, etc.).
+1. **Train** — runs `main.py` (default: `python main.py --debug --fast-train`). `main.py` builds the config and delegates to `Runner` in `runner.py` for the periodic parallelogram-constrained training loop. Fast mode disables W&B logging/sync, plots, validation grid evaluation, parallelogram evaluation, and intermediate checkpoints; it still writes a final local checkpoint. On completion, outputs are copied from a temp directory to `./models/{run_id}/`.
 2. **Resolve run** — parses the new `run_id` from training stdout (or falls back to the newest directory under `models/`).
 3. **Snapshot config** — loads the `defaults` dict from `main.py`, optionally merges `--config-overrides-json`, and writes `models/{run_id}/pipeline_config.json` so verification can run fully offline.
 4. **Verify (Step 5 MILP)** — invokes `scripts/verify_paralellogram_ip.py` with the local checkpoint, config snapshot, and `--eval-gridsize` (default `32`). The verifier discretizes the parallelogram, samples colors from the trained network, and solves an ILP to minimize bonus-color density. It prints the final **verified bonus color percentage** and saves artifacts under `fixed_colorings/`.
@@ -73,7 +73,7 @@ The pipeline runs four stages in order:
 run_pipeline.py
     │
     ├─► main.py ──► runner.py          (train p_θ, save checkpoint)
-    │       └─► models/{run_id}/       (trained_model.pt, plots, …)
+    │       └─► models/{run_id}/       (trained_model.pt, optional plots, …)
     │
     └─► scripts/verify_paralellogram_ip.py   (discretize + MILP fix)
             └─► fixed_colorings/       (coloring PDF/PNG, .npy, CSV log)
@@ -105,11 +105,26 @@ When evaluating code or hyperparameter changes, prefer `run_pipeline.py` over ca
 ### Training only (`main.py`)
 To run training without verification:
 ```bash
-uv run python main.py --debug
+uv run python main.py --debug --fast-train
 ```
 *Note: In debug mode (`--debug` in arguments), default parameters are used and a short runs/sweeps profile is executed. Without `--debug`, all config fields default to `None` for hyperparameter sweeps.*
 
-Checkpoints and plots are saved to `./models/{run_id}/` when the run completes.
+The final checkpoint is saved to `./models/{run_id}/` when the run completes. Full mode also saves plots and any configured intermediate checkpoints.
+
+For full W&B logging, plots, validation grid evaluation, and intermediate model syncs, omit `--fast-train`:
+```bash
+uv run python main.py --debug
+```
+
+Fast local sweeps can override the main training scale directly:
+```bash
+uv run python main.py --debug --fast-train --n-steps 1000 --batch-size 1024 --n-circle-points 4 --loss-log-every 100
+```
+
+To write checkpoints somewhere other than `models/`, pass an output root:
+```bash
+uv run python main.py --debug --fast-train --output-root /scratch/htc/npelleriti/agentic-almost-colorings
+```
 
 ### Local & Offline Runs
 You do not need a connection to the Weights & Biases (W&B) cloud to run this code. `run_pipeline.py` sets `WANDB_MODE=disabled` by default. For standalone training:
