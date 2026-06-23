@@ -1,0 +1,219 @@
+{
+  "name": "parallelogram-coarse-grid-loop",
+  "description": "Verifier-only coarse-to-fine parallelogram grid search with four deterministic strategy families, shared concise agent reports, scratch-backed CBC tmp files, 30-minute solver budget, bounded parallelism, and no-failure-on-no-improvement iteration semantics.",
+  "inputs": {
+    "baselinePct": {
+      "description": "Baseline verified fraction_fixed_to_5 (%) to compare against.",
+      "default": "3.86731625"
+    },
+    "iterations": {
+      "description": "Number of coarse-to-fine experiment loops. No-improvement iterations are recorded and the loop continues.",
+      "default": "3"
+    },
+    "outputRoot": {
+      "description": "Scratch-backed root for all generated artifacts.",
+      "default": "/scratch/htc/npelleriti/pi-sandbox/parallelogram-coarse-grid-loop"
+    },
+    "baseRadius": {
+      "description": "Initial local search radius in parallelogram coordinate units; halves each iteration.",
+      "default": "0.001"
+    },
+    "scaleCount": {
+      "description": "Initial scale-family candidates per iteration.",
+      "default": "25"
+    },
+    "shearCount": {
+      "description": "Initial shear-family candidates per iteration.",
+      "default": "25"
+    },
+    "coordCount": {
+      "description": "Initial coordinate-family candidates per iteration.",
+      "default": "50"
+    },
+    "lhsCount": {
+      "description": "Initial deterministic local-cloud candidates per iteration.",
+      "default": "50"
+    },
+    "screenGrid": {
+      "description": "Cheap screen grid.",
+      "default": "128"
+    },
+    "mediumGrid": {
+      "description": "Medium verification grid before final promotion.",
+      "default": "512"
+    },
+    "finalGrid": {
+      "description": "Baseline-comparable final grid.",
+      "default": "2048"
+    },
+    "screenParallel": {
+      "description": "Parallel screen verifier subprocesses.",
+      "default": "16"
+    },
+    "mediumParallel": {
+      "description": "Parallel medium verifier subprocesses.",
+      "default": "8"
+    },
+    "finalParallel": {
+      "description": "Parallel final 2048 verifier subprocesses. For 128GB RAM, keep <=4.",
+      "default": "4"
+    },
+    "screenSolverLimit": {
+      "description": "CBC solver limit for screen subprocesses, seconds.",
+      "default": "300"
+    },
+    "mediumSolverLimit": {
+      "description": "CBC solver limit for medium subprocesses, seconds.",
+      "default": "900"
+    },
+    "finalSolverLimit": {
+      "description": "CBC solver limit for final subprocesses, seconds. Default is 30 minutes.",
+      "default": "1800"
+    },
+    "solverThreads": {
+      "description": "CBC threads per verifier subprocess. Use 1 for broad parallel search.",
+      "default": "1"
+    },
+    "screenPromote": {
+      "description": "Maximum screen candidates promoted into refinement.",
+      "default": "24"
+    },
+    "mediumPromote": {
+      "description": "Maximum medium candidates promoted to final.",
+      "default": "4"
+    },
+    "resetState": {
+      "description": "If true, discard previous state.json and restart from discovered seed.",
+      "default": "false"
+    }
+  },
+  "defaults": {
+    "maxOutputBytes": 24000,
+    "thinking": "low"
+  },
+  "steps": [
+    {
+      "id": "init",
+      "name": "Initialize scratch state and discover seed parallelogram",
+      "kind": "shell",
+      "command": "set -euo pipefail\nRESET=\"\"\ncase \"{input.resetState}\" in true|1|yes|y) RESET=\"--reset-state\" ;; esac\nmkdir -p \"{input.outputRoot}\"\nuv run python .pi/scripts/parallelogram_grid_search.py init --root \"{input.outputRoot}\" --baseline-pct \"{input.baselinePct}\" $RESET"
+    },
+    {
+      "id": "search_loop",
+      "name": "Bounded coarse-to-fine search loop; no improvement is not failure",
+      "kind": "loop",
+      "iterations": "{input.iterations}",
+      "steps": [
+        {
+          "id": "generate_coarse_candidates",
+          "name": "Generate four-family coarse candidates around current best",
+          "kind": "shell",
+          "command": "set -euo pipefail\nuv run python .pi/scripts/parallelogram_grid_search.py make-candidates \\\n  --root \"{input.outputRoot}\" \\\n  --iteration \"{loop.iteration}\" \\\n  --base-radius \"{input.baseRadius}\" \\\n  --scale-count \"{input.scaleCount}\" \\\n  --shear-count \"{input.shearCount}\" \\\n  --coord-count \"{input.coordCount}\" \\\n  --lhs-count \"{input.lhsCount}\""
+        },
+        {
+          "id": "screen_sweep",
+          "name": "Parallel 128-grid screen sweep",
+          "kind": "async_shell",
+          "jobId": "parallelogram-grid-screen-iter-{loop.iteration}",
+          "dbPath": "{input.outputRoot}/jobs/parallelogram-coarse-grid-loop.sqlite",
+          "outputDir": "{input.outputRoot}/jobs/screen-iter-{loop.iteration}",
+          "pollIntervalMs": 10000,
+          "timeoutMs": 172800000,
+          "command": "set -euo pipefail\nuv run python .pi/scripts/parallelogram_grid_search.py sweep \\\n  --root \"{input.outputRoot}\" \\\n  --iteration \"{loop.iteration}\" \\\n  --stage screen \\\n  --input-csv \"{input.outputRoot}/iterations/iter_{loop.iteration}/candidates.csv\" \\\n  --grid \"{input.screenGrid}\" \\\n  --parallel \"{input.screenParallel}\" \\\n  --solver-limit \"{input.screenSolverLimit}\" \\\n  --solver-threads \"{input.solverThreads}\" \\\n  --wall-timeout 3600"
+        },
+        {
+          "id": "select_screen_promotions",
+          "name": "Family-diverse screen promotion",
+          "kind": "shell",
+          "command": "set -euo pipefail\nITER={loop.iteration}\nuv run python .pi/scripts/parallelogram_grid_search.py select \\\n  --input-csv \"{input.outputRoot}/iterations/iter_$ITER/screen/screen_results.csv\" \\\n  --output-csv \"{input.outputRoot}/iterations/iter_$ITER/screen_promoted.csv\" \\\n  --family-top-k 3 \\\n  --global-top-k \"{input.screenPromote}\" \\\n  --max-selected \"{input.screenPromote}\""
+        },
+        {
+          "id": "generate_refined_candidates",
+          "name": "Generate local refinements around promoted candidates",
+          "kind": "shell",
+          "command": "set -euo pipefail\nITER={loop.iteration}\nREFINE_RADIUS=$(uv run python - <<'PY'\nbase=float(\"{input.baseRadius}\")\nit=int(\"{loop.iteration}\")\nprint(base/(2**it))\nPY\n)\nuv run python .pi/scripts/parallelogram_grid_search.py refine \\\n  --root \"{input.outputRoot}\" \\\n  --iteration \"{loop.iteration}\" \\\n  --input-csv \"{input.outputRoot}/iterations/iter_$ITER/screen_promoted.csv\" \\\n  --radius \"$REFINE_RADIUS\""
+        },
+        {
+          "id": "medium_sweep",
+          "name": "Parallel medium-grid verification for refined candidates",
+          "kind": "async_shell",
+          "jobId": "parallelogram-grid-medium-iter-{loop.iteration}",
+          "dbPath": "{input.outputRoot}/jobs/parallelogram-coarse-grid-loop.sqlite",
+          "outputDir": "{input.outputRoot}/jobs/medium-iter-{loop.iteration}",
+          "pollIntervalMs": 10000,
+          "timeoutMs": 172800000,
+          "command": "set -euo pipefail\nITER={loop.iteration}\nuv run python .pi/scripts/parallelogram_grid_search.py sweep \\\n  --root \"{input.outputRoot}\" \\\n  --iteration \"{loop.iteration}\" \\\n  --stage medium \\\n  --input-csv \"{input.outputRoot}/iterations/iter_$ITER/refined_candidates.csv\" \\\n  --grid \"{input.mediumGrid}\" \\\n  --parallel \"{input.mediumParallel}\" \\\n  --solver-limit \"{input.mediumSolverLimit}\" \\\n  --solver-threads \"{input.solverThreads}\" \\\n  --wall-timeout 7200"
+        },
+        {
+          "id": "select_final_promotions",
+          "name": "Promote top medium candidates to final 2048 verification",
+          "kind": "shell",
+          "command": "set -euo pipefail\nITER={loop.iteration}\nuv run python .pi/scripts/parallelogram_grid_search.py select \\\n  --input-csv \"{input.outputRoot}/iterations/iter_$ITER/medium/medium_results.csv\" \\\n  --output-csv \"{input.outputRoot}/iterations/iter_$ITER/final_promoted.csv\" \\\n  --family-top-k 0 \\\n  --global-top-k \"{input.mediumPromote}\" \\\n  --max-selected \"{input.mediumPromote}\""
+        },
+        {
+          "id": "final_sweep",
+          "name": "Parallel final 2048 verification with 30-minute solver budget",
+          "kind": "async_shell",
+          "jobId": "parallelogram-grid-final-iter-{loop.iteration}",
+          "dbPath": "{input.outputRoot}/jobs/parallelogram-coarse-grid-loop.sqlite",
+          "outputDir": "{input.outputRoot}/jobs/final-iter-{loop.iteration}",
+          "pollIntervalMs": 10000,
+          "timeoutMs": 259200000,
+          "command": "set -euo pipefail\nITER={loop.iteration}\nuv run python .pi/scripts/parallelogram_grid_search.py sweep \\\n  --root \"{input.outputRoot}\" \\\n  --iteration \"{loop.iteration}\" \\\n  --stage final \\\n  --input-csv \"{input.outputRoot}/iterations/iter_$ITER/final_promoted.csv\" \\\n  --grid \"{input.finalGrid}\" \\\n  --parallel \"{input.finalParallel}\" \\\n  --solver-limit \"{input.finalSolverLimit}\" \\\n  --solver-threads \"{input.solverThreads}\" \\\n  --wall-timeout 10800"
+        },
+        {
+          "id": "write_iteration_report",
+          "name": "Update best-state and write concise markdown report; never fail on no improvement",
+          "kind": "shell",
+          "allowFailure": false,
+          "command": "set -euo pipefail\nITER={loop.iteration}\nuv run python .pi/scripts/parallelogram_grid_search.py report \\\n  --root \"{input.outputRoot}\" \\\n  --iteration \"{loop.iteration}\" \\\n  --final-csv \"{input.outputRoot}/iterations/iter_$ITER/final/final_results.csv\""
+        },
+        {
+          "id": "agent_strategy_notes",
+          "name": "Four concise strategy notes for the next loop",
+          "kind": "parallel",
+          "failFast": false,
+          "branches": [
+            {
+              "id": "scale_note",
+              "kind": "agent",
+              "tools": ["read", "write"],
+              "prompt": "Read {input.outputRoot}/reports/shared_context.md. Write a super concise markdown note (<=8 bullets) on scale-family next moves to {input.outputRoot}/reports/agents/iter_{loop.iteration}_scale.md. Include only actionable observations; no long prose."
+            },
+            {
+              "id": "shear_note",
+              "kind": "agent",
+              "tools": ["read", "write"],
+              "prompt": "Read {input.outputRoot}/reports/shared_context.md. Write a super concise markdown note (<=8 bullets) on shear/area-preserving next moves to {input.outputRoot}/reports/agents/iter_{loop.iteration}_shear.md. Include only actionable observations; no long prose."
+            },
+            {
+              "id": "coord_note",
+              "kind": "agent",
+              "tools": ["read", "write"],
+              "prompt": "Read {input.outputRoot}/reports/shared_context.md. Write a super concise markdown note (<=8 bullets) on coordinate perturbation next moves to {input.outputRoot}/reports/agents/iter_{loop.iteration}_coordinate.md. Include only actionable observations; no long prose."
+            },
+            {
+              "id": "cloud_note",
+              "kind": "agent",
+              "tools": ["read", "write"],
+              "prompt": "Read {input.outputRoot}/reports/shared_context.md. Write a super concise markdown note (<=8 bullets) on deterministic local-cloud/LHS next moves to {input.outputRoot}/reports/agents/iter_{loop.iteration}_cloud.md. Include only actionable observations; no long prose."
+            }
+          ]
+        },
+        {
+          "id": "collect_agent_notes",
+          "name": "Append agent notes to shared context for later iterations",
+          "kind": "shell",
+          "allowFailure": true,
+          "command": "set -euo pipefail\nuv run python .pi/scripts/parallelogram_grid_search.py collect-agent-notes --root \"{input.outputRoot}\" --iteration \"{loop.iteration}\""
+        }
+      ]
+    },
+    {
+      "id": "final_summary",
+      "name": "Print final search state and report locations",
+      "kind": "shell",
+      "command": "set -euo pipefail\necho 'state:'\nuv run python - <<'PY'\nimport json\nfrom pathlib import Path\nroot=Path(\"{input.outputRoot}\")\nprint(json.dumps(json.loads((root/'state.json').read_text()), indent=2, sort_keys=True)[:12000])\nprint('shared_context=' + str(root/'reports'/'shared_context.md'))\nprint('jobs_db=' + str(root/'jobs'/'parallelogram-coarse-grid-loop.sqlite'))\nPY"
+    }
+  ]
+}

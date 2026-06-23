@@ -735,10 +735,20 @@ def _optional_bool(value):
     return value == 'on'
 
 
+def _apply_solver_tmp_dir(solver):
+    """Force PuLP/CBC scratch files off the container's tiny /tmp mount."""
+    tmp_dir = os.environ.get('PULP_TMP_DIR') or os.environ.get('TMPDIR')
+    if tmp_dir and hasattr(solver, 'tmpDir'):
+        Path(tmp_dir).mkdir(parents=True, exist_ok=True)
+        solver.tmpDir = tmp_dir
+        print(f"Using solver tmpDir={tmp_dir}")
+    return solver
+
+
 def _make_mip_solver(msg):
     solver_threads = max(1, args.solver_threads)
     if args.solver_backend == 'cbc':
-        return pulp.PULP_CBC_CMD(
+        return _apply_solver_tmp_dir(pulp.PULP_CBC_CMD(
             msg=msg,
             timeLimit=args.solver_time_limit,
             threads=solver_threads,
@@ -748,9 +758,9 @@ def _make_mip_solver(msg):
             cuts=_optional_bool(args.cbc_cuts),
             presolve=_optional_bool(args.cbc_presolve),
             strong=args.cbc_strong,
-        )
+        ))
     if args.solver_backend == 'scip':
-        return pulp.SCIP_CMD(
+        return _apply_solver_tmp_dir(pulp.SCIP_CMD(
             path=args.scip_path,
             msg=msg,
             timeLimit=args.solver_time_limit,
@@ -758,7 +768,7 @@ def _make_mip_solver(msg):
             gapAbs=args.solver_gap_abs,
             gapRel=args.solver_gap_rel,
             maxNodes=args.solver_max_nodes,
-        )
+        ))
     raise ValueError(f"MIP solver requested for non-MIP backend {args.solver_backend!r}")
 
 

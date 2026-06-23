@@ -1,0 +1,130 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="1360" viewBox="0 0 1180 1360">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#333"/>
+    </marker>
+    <style>
+      .title { font: 700 26px sans-serif; fill: #111; }
+      .small { font: 13px sans-serif; fill: #333; }
+      .node-title { font: 700 15px sans-serif; fill: #111; }
+      .node-text { font: 13px sans-serif; fill: #222; }
+      .shell { fill: #eef5ff; stroke: #4d78b8; stroke-width: 2; rx: 8; }
+      .agent { fill: #fff3d6; stroke: #b8871f; stroke-width: 2; rx: 8; }
+      .async { fill: #f1e9ff; stroke: #7a4cc2; stroke-width: 2; rx: 8; }
+      .control { fill: #eaf7ea; stroke: #3f8d46; stroke-width: 2; rx: 8; }
+      .edge { stroke: #333; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+      .edge-light { stroke: #666; stroke-width: 2; fill: none; stroke-dasharray: 6 5; marker-end: url(#arrow); }
+      .band { fill: #fafafa; stroke: #bbb; stroke-width: 2; rx: 10; }
+    </style>
+  </defs>
+
+  <text x="590" y="36" text-anchor="middle" class="title">batched-neural-repair-verification-loop</text>
+  <text x="590" y="62" text-anchor="middle" class="small">Preflight -> CUDA capacity calibration -> 20-round four-agent async exploration loop -> final synthesis</text>
+
+  <rect x="440" y="90" width="300" height="52" class="control"/>
+  <text x="590" y="112" text-anchor="middle" class="node-title">workflow_run</text>
+  <text x="590" y="132" text-anchor="middle" class="node-text">project workflow execution</text>
+
+  <rect x="420" y="180" width="340" height="74" class="shell"/>
+  <text x="590" y="204" text-anchor="middle" class="node-title">preflight</text>
+  <text x="590" y="224" text-anchor="middle" class="node-text">source worktree, shared venv</text>
+  <text x="590" y="242" text-anchor="middle" class="node-text">ensemble_eval.py, smoke trainer</text>
+
+  <rect x="420" y="292" width="340" height="74" class="shell"/>
+  <text x="590" y="316" text-anchor="middle" class="node-title">capacity_calibration</text>
+  <text x="590" y="336" text-anchor="middle" class="node-text">timed one-GPU ensemble sweep</text>
+  <text x="590" y="354" text-anchor="middle" class="node-text">writes state/capacity_calibration.json</text>
+
+  <rect x="420" y="404" width="340" height="74" class="agent"/>
+  <text x="590" y="428" text-anchor="middle" class="node-title">seed_initial_instructions</text>
+  <text x="590" y="448" text-anchor="middle" class="node-text">agent, xhigh</text>
+  <text x="590" y="466" text-anchor="middle" class="node-text">four starting search briefs</text>
+
+  <rect x="420" y="516" width="340" height="74" class="shell"/>
+  <text x="590" y="540" text-anchor="middle" class="node-title">validate_seed_instructions</text>
+  <text x="590" y="560" text-anchor="middle" class="node-text">schema gate</text>
+  <text x="590" y="578" text-anchor="middle" class="node-text">install round-1 prompts</text>
+
+  <rect x="50" y="630" width="1080" height="520" class="band"/>
+  <text x="90" y="660" class="node-title">exploration_loop</text>
+  <text x="90" y="680" class="node-text">1-20 rounds. Each round prepares four worktrees, runs four async explorers, collects evidence, reflects, and spawns next prompts.</text>
+
+  <rect x="420" y="710" width="340" height="66" class="shell"/>
+  <text x="590" y="734" text-anchor="middle" class="node-title">round_preflight</text>
+  <text x="590" y="754" text-anchor="middle" class="node-text">worktrees, prompts, GPU lock</text>
+
+  <rect x="420" y="814" width="340" height="58" class="control"/>
+  <text x="590" y="838" text-anchor="middle" class="node-title">parallel_explorers</text>
+  <text x="590" y="858" text-anchor="middle" class="node-text">four async_shell jobs</text>
+
+  <rect x="70" y="920" width="240" height="92" class="async"/>
+  <text x="190" y="944" text-anchor="middle" class="node-title">agent_1_async</text>
+  <text x="190" y="964" text-anchor="middle" class="node-text">geometry/parallelogram</text>
+  <text x="190" y="982" text-anchor="middle" class="node-text">thinking: high</text>
+  <text x="190" y="1000" text-anchor="middle" class="node-text">timeout 1h, allowFailure</text>
+
+  <rect x="335" y="920" width="240" height="92" class="async"/>
+  <text x="455" y="944" text-anchor="middle" class="node-title">agent_2_async</text>
+  <text x="455" y="964" text-anchor="middle" class="node-text">loss/schedule</text>
+  <text x="455" y="982" text-anchor="middle" class="node-text">thinking: high</text>
+  <text x="455" y="1000" text-anchor="middle" class="node-text">timeout 1h, allowFailure</text>
+
+  <rect x="600" y="920" width="240" height="92" class="async"/>
+  <text x="720" y="944" text-anchor="middle" class="node-title">agent_3_async</text>
+  <text x="720" y="964" text-anchor="middle" class="node-text">architecture/capacity</text>
+  <text x="720" y="982" text-anchor="middle" class="node-text">thinking: medium</text>
+  <text x="720" y="1000" text-anchor="middle" class="node-text">timeout 1h, allowFailure</text>
+
+  <rect x="865" y="920" width="240" height="92" class="async"/>
+  <text x="985" y="944" text-anchor="middle" class="node-title">agent_4_async</text>
+  <text x="985" y="964" text-anchor="middle" class="node-text">repair/verification</text>
+  <text x="985" y="982" text-anchor="middle" class="node-text">thinking: xhigh</text>
+  <text x="985" y="1000" text-anchor="middle" class="node-text">timeout 1h, allowFailure</text>
+
+  <rect x="420" y="1060" width="340" height="66" class="shell"/>
+  <text x="590" y="1084" text-anchor="middle" class="node-title">collect_round_outputs</text>
+  <text x="590" y="1104" text-anchor="middle" class="node-text">reports, artifacts, async DB</text>
+
+  <rect x="420" y="1176" width="340" height="74" class="agent"/>
+  <text x="590" y="1200" text-anchor="middle" class="node-title">reflect_and_spawn</text>
+  <text x="590" y="1220" text-anchor="middle" class="node-text">agent, xhigh</text>
+  <text x="590" y="1238" text-anchor="middle" class="node-text">next four instructions</text>
+
+  <rect x="420" y="1288" width="340" height="58" class="shell"/>
+  <text x="590" y="1312" text-anchor="middle" class="node-title">validate_reflection</text>
+  <text x="590" y="1332" text-anchor="middle" class="node-text">schema gate and update prompts</text>
+
+  <rect x="810" y="1176" width="300" height="74" class="agent"/>
+  <text x="960" y="1200" text-anchor="middle" class="node-title">final_synthesis</text>
+  <text x="960" y="1220" text-anchor="middle" class="node-text">agent, xhigh</text>
+  <text x="960" y="1238" text-anchor="middle" class="node-text">summary and fanout plan</text>
+
+  <rect x="810" y="1288" width="300" height="58" class="shell"/>
+  <text x="960" y="1312" text-anchor="middle" class="node-title">validate_final_synthesis</text>
+  <text x="960" y="1332" text-anchor="middle" class="node-text">final artifact gate</text>
+
+  <path d="M590 142 L590 180" class="edge"/>
+  <path d="M590 254 L590 292" class="edge"/>
+  <path d="M590 366 L590 404" class="edge"/>
+  <path d="M590 478 L590 516" class="edge"/>
+  <path d="M590 590 L590 710" class="edge"/>
+  <path d="M590 776 L590 814" class="edge"/>
+
+  <path d="M590 872 C590 890 190 890 190 920" class="edge"/>
+  <path d="M590 872 C590 895 455 895 455 920" class="edge"/>
+  <path d="M590 872 C590 895 720 895 720 920" class="edge"/>
+  <path d="M590 872 C590 890 985 890 985 920" class="edge"/>
+
+  <path d="M190 1012 C190 1040 590 1036 590 1060" class="edge"/>
+  <path d="M455 1012 C455 1040 590 1036 590 1060" class="edge"/>
+  <path d="M720 1012 C720 1040 590 1036 590 1060" class="edge"/>
+  <path d="M985 1012 C985 1040 590 1036 590 1060" class="edge"/>
+
+  <path d="M590 1126 L590 1176" class="edge"/>
+  <path d="M590 1250 L590 1288" class="edge"/>
+  <path d="M420 1317 C140 1317 140 743 420 743" class="edge-light"/>
+  <text x="142" y="1294" class="small">next round until budget exhausted</text>
+
+  <path d="M760 1317 C790 1317 790 1213 810 1213" class="edge"/>
+  <path d="M960 1250 L960 1288" class="edge"/>
+</svg>

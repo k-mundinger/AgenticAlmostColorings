@@ -436,6 +436,8 @@ def main() -> int:
                 loss_now = final_losses.detach().cpu().tolist()
                 for idx, (_, writer) in enumerate(loss_files):
                     writer.writerow([step, f"{loss_now[idx]:.10f}", f"{lr_now[idx]:.10g}"])
+                for f, _ in loss_files:
+                    f.flush()
                 min_loss = float(final_losses.min().detach().cpu())
                 median_loss = float(final_losses.median().detach().cpu())
                 print(f"step={step} min_loss={min_loss:.8f} median_loss={median_loss:.8f} lr_scale={scale:.6g}", flush=True)

@@ -1,0 +1,61 @@
+{
+  "run_id": 1,
+  "seed": 7000126,
+  "problem_name": "HadwigerNelson",
+  "dim": 2,
+  "n_colours": 6,
+  "optimizer": {
+    "name": "AdamW",
+    "learning_rate": 0.001,
+    "weight_decay": 0.0
+  },
+  "training": {
+    "n_steps": 10000,
+    "batch_size": 2048,
+    "grid_input_scale": 1.0,
+    "loss_fn": "log_prob",
+    "grid_sizes": [
+      6.0,
+      6.0
+    ],
+    "p_norm": 2.0,
+    "n_circle_points": 8,
+    "temperature": 5.0,
+    "good_coloring": true,
+    "good_coloring_weight": 0.05,
+    "parallelogram": [
+      [
+        -0.17407057,
+        3.8842025
+      ],
+      [
+        -3.48389,
+        1.8401014
+      ]
+    ],
+    "trainable_parallelogram": 1
+  },
+  "model": {
+    "name": "ResMLP",
+    "n_hidden_layers": 4,
+    "n_hidden_units": 32,
+    "activation": "sin",
+    "initialization": "siren",
+    "disable_residual_connections": true
+  },
+  "metrics": {
+    "plot_grid_size": 512,
+    "val_grid_size": 128,
+    "n_circle_points": 128,
+    "log_metrics_every_k_steps": 1000,
+    "log_imgs_every_k_steps": 1000,
+    "log_model_every_k_steps": 1000,
+    "enable_wandb_logging": false,
+    "enable_eval": false,
+    "enable_plots": false,
+    "save_intermediate_models": false,
+    "sync_models_to_wandb": false,
+    "save_final_model": true,
+    "loss_log_every_k_steps": 500
+  }
+}

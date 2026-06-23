@@ -1,0 +1,209 @@
+{
+  "name": "batched-neural-repair-verification-loop",
+  "description": "One-GPU batched neural sweep plus heuristic repair and verification exploration loop targeting <3.60% bonus cells.",
+  "inputs": {
+    "baseRef": {
+      "description": "Git ref used for scratch experiment worktrees.",
+      "default": "origin/konrad-manual-sweep"
+    },
+    "rounds": {
+      "description": "Number of exploration/reflection rounds in [1,20].",
+      "default": "20"
+    },
+    "targetPct": {
+      "description": "Target verified bonus color percentage.",
+      "default": "3.60"
+    },
+    "baselinePct": {
+      "description": "Promotion baseline bonus percentage.",
+      "default": "3.733221980"
+    },
+    "calibrationSeconds": {
+      "description": "Initial one-GPU capacity calibration budget in seconds.",
+      "default": "300"
+    },
+    "agentTimeoutSeconds": {
+      "description": "Per-explorer wall time cap in seconds.",
+      "default": "3600"
+    },
+    "outputRoot": {
+      "description": "Scratch root for worktrees, jobs, reports, calibration, and final artifacts.",
+      "default": ".workflow_runs/batched-neural-repair-verification-loop"
+    }
+  },
+  "defaults": {
+    "maxOutputBytes": 60000,
+    "thinking": "high",
+    "noExtensions": true
+  },
+  "steps": [
+    {
+      "id": "preflight",
+      "name": "Create source worktree, shared venv, ensemble eval helper, and smoke test trainer",
+      "kind": "shell",
+      "command": "set -euo pipefail\nREPO_ROOT=$(git rev-parse --show-toplevel)\nBASE_REF=\"{input.baseRef}\"\nROOT_INPUT=\"{input.outputRoot}\"\ncase \"$ROOT_INPUT\" in \"/\"*) ROOT=\"$ROOT_INPUT\" ;; *) ROOT=\"$REPO_ROOT/$ROOT_INPUT\" ;; esac\nmkdir -p \"$ROOT\" \"$ROOT/state\" \"$ROOT/jobs\" \"$ROOT/worktrees\" \"$ROOT/reports\" \"$ROOT/source\"\nAAC_SHARED_VENV=\"$(printenv AAC_SHARED_VENV || true)\"\nif [ -z \"$AAC_SHARED_VENV\" ]; then\n  AAC_SHARED_VENV=\"$ROOT/shared_venv\"\nfi\nexport AAC_SHARED_VENV\nexport UV_PROJECT_ENVIRONMENT=\"$AAC_SHARED_VENV\"\nSOURCE_WORKTREE=\"$ROOT/source/konrad_manual_sweep\"\nHELPER=\"$REPO_ROOT/.pi/scripts/batched_neural_workflow.py\"\nif ! git rev-parse --verify \"$BASE_REF^0\" >/dev/null 2>&1; then\n  echo \"baseRef not found locally: $BASE_REF\" >&2\n  exit 2\nfi\nBASE_HEAD=$(git rev-parse \"$BASE_REF^0\")\ngit worktree remove --force \"$SOURCE_WORKTREE\" >/dev/null 2>&1 || true\nrm -rf \"$SOURCE_WORKTREE\"\ngit worktree prune >/dev/null 2>&1 || true\ngit worktree add --detach \"$SOURCE_WORKTREE\" \"$BASE_HEAD\"\ncd \"$SOURCE_WORKTREE\"\nuv sync --frozen\nexport VIRTUAL_ENV=\"$AAC_SHARED_VENV\"\nexport PATH=\"$AAC_SHARED_VENV/bin:$PATH\"\nexport UV_NO_SYNC=1\nPY=\"$AAC_SHARED_VENV/bin/python\"\nif [ ! -x \"$PY\" ]; then\n  echo \"missing shared venv python after uv sync: $PY\" >&2\n  exit 2\nfi\n\"$PY\" \"$HELPER\" preflight   --repo-root \"$REPO_ROOT\"   --root \"$ROOT\"   --source-worktree \"$SOURCE_WORKTREE\"   --base-ref \"$BASE_REF\"   --base-head \"$BASE_HEAD\"   --rounds \"{input.rounds}\"   --calibration-seconds \"{input.calibrationSeconds}\"   --agent-timeout-seconds \"{input.agentTimeoutSeconds}\"   --target-pct \"{input.targetPct}\"   --baseline-pct \"{input.baselinePct}\"\n",
+      "timeoutMs": 900000,
+      "maxOutputBytes": 50000
+    },
+    {
+      "id": "capacity_calibration",
+      "name": "Timed one-GPU ensemble capacity calibration",
+      "kind": "shell",
+      "command": "set -euo pipefail\nREPO_ROOT=$(git rev-parse --show-toplevel)\nROOT_INPUT=\"{input.outputRoot}\"\ncase \"$ROOT_INPUT\" in \"/\"*) ROOT=\"$ROOT_INPUT\" ;; *) ROOT=\"$REPO_ROOT/$ROOT_INPUT\" ;; esac\nAAC_SHARED_VENV=\"$(printenv AAC_SHARED_VENV || true)\"\nif [ -z \"$AAC_SHARED_VENV\" ]; then\n  AAC_SHARED_VENV=\"$ROOT/shared_venv\"\nfi\nexport AAC_SHARED_VENV\nexport UV_PROJECT_ENVIRONMENT=\"$AAC_SHARED_VENV\"\nexport VIRTUAL_ENV=\"$AAC_SHARED_VENV\"\nexport PATH=\"$AAC_SHARED_VENV/bin:$PATH\"\nexport UV_NO_SYNC=1\nPY=\"$AAC_SHARED_VENV/bin/python\"\nHELPER=\"$REPO_ROOT/.pi/scripts/batched_neural_workflow.py\"\nif [ ! -x \"$PY\" ]; then\n  echo \"missing shared venv python: $PY\" >&2\n  echo \"workflow preflight must run uv sync --frozen before later steps\" >&2\n  exit 2\nfi\n\"$PY\" \"$HELPER\" capacity --root \"$ROOT\" --calibration-seconds \"{input.calibrationSeconds}\"\n",
+      "timeoutMs": 2400000,
+      "maxOutputBytes": 50000
+    },
+    {
+      "id": "seed_initial_instructions",
+      "name": "Create four initial search briefs from branch context and calibration results",
+      "kind": "agent",
+      "thinking": "xhigh",
+      "tools": [
+        "read",
+        "write"
+      ],
+      "expectJson": true,
+      "retries": 1,
+      "prompt": "Read the workflow design and calibration artifacts, then create the initial four-agent plan for a long batched neural + repair + verification campaign.\n\nRead:\n- {input.outputRoot}/design_brief.md\n- {input.outputRoot}/state/inventory.json\n- {input.outputRoot}/state/capacity_calibration.json\n- {input.outputRoot}/state/capacity_calibration.md\n- {input.outputRoot}/source/konrad_manual_sweep/README.md\n- {input.outputRoot}/source/konrad_manual_sweep/scripts/train_batched_ensemble.py\n- {input.outputRoot}/source/konrad_manual_sweep/scripts/verify_parallelogram_heuristic.py\n- {input.outputRoot}/source/konrad_manual_sweep/scripts/verify_paralellogram_ip.py\n\nGoal: find or prepare a route to a verified almost-5-coloring below {input.targetPct}% bonus cells. Create four distinct starting instructions: geometry/parallelogram; loss/optimizer/schedule; architecture/capacity; repair/verification/final fanout. Each instruction must be concrete, command-oriented, use the calibrated ensemble capacity, require the GPU flock lock for training, and require negative evidence.\n\nWrite a valid JSON object to {input.outputRoot}/state/seed_instructions.json and return the same JSON. Exact keys only: round_summary, best_findings, rejected_or_weak_findings, risks, agent_1, agent_2, agent_3, agent_4. Return JSON only.",
+      "maxOutputBytes": 50000
+    },
+    {
+      "id": "validate_seed_instructions",
+      "name": "Validate seed JSON and install round-1 instructions",
+      "kind": "shell",
+      "command": "set -euo pipefail\nREPO_ROOT=$(git rev-parse --show-toplevel)\nROOT_INPUT=\"{input.outputRoot}\"\ncase \"$ROOT_INPUT\" in \"/\"*) ROOT=\"$ROOT_INPUT\" ;; *) ROOT=\"$REPO_ROOT/$ROOT_INPUT\" ;; esac\nAAC_SHARED_VENV=\"$(printenv AAC_SHARED_VENV || true)\"\nif [ -z \"$AAC_SHARED_VENV\" ]; then\n  AAC_SHARED_VENV=\"$ROOT/shared_venv\"\nfi\nexport AAC_SHARED_VENV\nexport UV_PROJECT_ENVIRONMENT=\"$AAC_SHARED_VENV\"\nexport VIRTUAL_ENV=\"$AAC_SHARED_VENV\"\nexport PATH=\"$AAC_SHARED_VENV/bin:$PATH\"\nexport UV_NO_SYNC=1\nPY=\"$AAC_SHARED_VENV/bin/python\"\nHELPER=\"$REPO_ROOT/.pi/scripts/batched_neural_workflow.py\"\nif [ ! -x \"$PY\" ]; then\n  echo \"missing shared venv python: $PY\" >&2\n  echo \"workflow preflight must run uv sync --frozen before later steps\" >&2\n  exit 2\nfi\n\"$PY\" \"$HELPER\" validate-seed --root \"$ROOT\"\n",
+      "timeoutMs": 60000,
+      "maxOutputBytes": 20000
+    },
+    {
+      "id": "exploration_loop",
+      "name": "Run long four-agent batched neural/repair exploration loop",
+      "kind": "loop",
+      "iterations": "{input.rounds}",
+      "steps": [
+        {
+          "id": "round_preflight",
+          "name": "Create per-agent worktrees and prompts with shared GPU lock instructions",
+          "kind": "shell",
+          "command": "set -euo pipefail\nREPO_ROOT=$(git rev-parse --show-toplevel)\nROOT_INPUT=\"{input.outputRoot}\"\ncase \"$ROOT_INPUT\" in \"/\"*) ROOT=\"$ROOT_INPUT\" ;; *) ROOT=\"$REPO_ROOT/$ROOT_INPUT\" ;; esac\nAAC_SHARED_VENV=\"$(printenv AAC_SHARED_VENV || true)\"\nif [ -z \"$AAC_SHARED_VENV\" ]; then\n  AAC_SHARED_VENV=\"$ROOT/shared_venv\"\nfi\nexport AAC_SHARED_VENV\nexport UV_PROJECT_ENVIRONMENT=\"$AAC_SHARED_VENV\"\nexport VIRTUAL_ENV=\"$AAC_SHARED_VENV\"\nexport PATH=\"$AAC_SHARED_VENV/bin:$PATH\"\nexport UV_NO_SYNC=1\nPY=\"$AAC_SHARED_VENV/bin/python\"\nHELPER=\"$REPO_ROOT/.pi/scripts/batched_neural_workflow.py\"\nif [ ! -x \"$PY\" ]; then\n  echo \"missing shared venv python: $PY\" >&2\n  echo \"workflow preflight must run uv sync --frozen before later steps\" >&2\n  exit 2\nfi\n\"$PY\" \"$HELPER\" round-preflight --repo-root \"$REPO_ROOT\" --root \"$ROOT\" --iteration \"{loop.iteration}\" --target-pct \"{input.targetPct}\" --baseline-pct \"{input.baselinePct}\"\n",
+          "timeoutMs": 300000,
+          "maxOutputBytes": 50000
+        },
+        {
+          "id": "parallel_explorers",
+          "name": "Run four async explorer agents with serialized GPU lock for heavy commands",
+          "kind": "parallel",
+          "failFast": false,
+          "branches": [
+            {
+              "id": "agent_1_async",
+              "name": "Geometry/parallelogram explorer",
+              "kind": "async_shell",
+              "jobId": "batched-neural-r{loop.iteration}-a1",
+              "dbPath": "{input.outputRoot}/jobs/batched-neural-repair-verification-loop.sqlite",
+              "outputDir": "{input.outputRoot}/jobs/round_{loop.iteration}/agent_1",
+              "pollIntervalMs": 10000,
+              "timeoutMs": 3600000,
+              "wait": true,
+              "allowFailure": true,
+              "command": "set -euo pipefail\nREPO_ROOT=$(git rev-parse --show-toplevel)\nROOT_INPUT=\"{input.outputRoot}\"\ncase \"$ROOT_INPUT\" in \"/\"*) ROOT=\"$ROOT_INPUT\" ;; *) ROOT=\"$REPO_ROOT/$ROOT_INPUT\" ;; esac\nAAC_SHARED_VENV=\"$(printenv AAC_SHARED_VENV || true)\"\nif [ -z \"$AAC_SHARED_VENV\" ]; then\n  AAC_SHARED_VENV=\"$ROOT/shared_venv\"\nfi\nexport AAC_SHARED_VENV\nexport UV_PROJECT_ENVIRONMENT=\"$AAC_SHARED_VENV\"\nexport VIRTUAL_ENV=\"$AAC_SHARED_VENV\"\nexport PATH=\"$AAC_SHARED_VENV/bin:$PATH\"\nexport UV_NO_SYNC=1\nROUND=\"{loop.iteration}\"\nAGENT=\"1\"\nAGENT_DIR=\"$ROOT/round_$ROUND/agent_$AGENT\"\nWORKTREE=\"$ROOT/worktrees/round_$ROUND/agent_$AGENT\"\nPROMPT_FILE=\"$AGENT_DIR/prompt.md\"\nREPORT_FILE=\"$AGENT_DIR/report.md\"\nRAW_STDOUT=\"$AGENT_DIR/pi_raw_tail.jsonl\"\nRAW_STDERR=\"$AGENT_DIR/pi_raw_stderr_tail.log\"\nRAW_STDERR_FULL=\"$AGENT_DIR/pi_raw_stderr.full.log\"\nRAW_LOG_MAX_BYTES=\"$(printenv RAW_LOG_MAX_BYTES || true)\"\nif [ -z \"$RAW_LOG_MAX_BYTES\" ]; then\n  RAW_LOG_MAX_BYTES=2000000\nfi\nexport AAC_WORKFLOW_ROOT=\"$ROOT\"\nexport AAC_SOURCE_WORKTREE=\"$ROOT/source/konrad_manual_sweep\"\nexport AAC_GPU_LOCK=\"$ROOT/gpu.lock\"\nexport AAC_CALIBRATION_JSON=\"$ROOT/state/capacity_calibration.json\"\nexport MPLCONFIGDIR=\"$ROOT/mplconfig\"\nmkdir -p \"$AGENT_DIR\" \"$MPLCONFIGDIR\"\nif [ ! -x \"$AAC_SHARED_VENV/bin/python\" ]; then\n  echo \"missing shared python: $AAC_SHARED_VENV/bin/python\" >&2\n  exit 2\nfi\nif [ ! -d \"$WORKTREE/.git\" ] && [ ! -f \"$WORKTREE/.git\" ]; then\n  echo \"missing worktree: $WORKTREE\" >&2\n  exit 2\nfi\nif [ ! -r \"$PROMPT_FILE\" ]; then\n  echo \"missing prompt: $PROMPT_FILE\" >&2\n  exit 2\nfi\nprintf 'shared_venv=%s python=%s gpu_lock=%s\n' \"$AAC_SHARED_VENV\" \"$AAC_SHARED_VENV/bin/python\" \"$AAC_GPU_LOCK\" > \"$AGENT_DIR/env_status.log\"\nprintf 'event=agent_start round=%s agent=%s worktree=%s prompt=%s\n' \"$ROUND\" \"$AGENT\" \"$WORKTREE\" \"$PROMPT_FILE\" > \"$AGENT_DIR/runner_status.log\"\ncd \"$WORKTREE\"\nset +e\ntimeout --foreground --kill-after=30s \"{input.agentTimeoutSeconds}s\"   pi --mode json -p --no-session --no-extensions --thinking high --tools read,write,edit,bash \"$(cat \"$PROMPT_FILE\")\"   2> \"$RAW_STDERR_FULL\" | tail -c \"$RAW_LOG_MAX_BYTES\" > \"$RAW_STDOUT\"\ncode=$PIPESTATUS\ntail_code=0\nset -e\nif [ -s \"$RAW_STDERR_FULL\" ]; then\n  tail -c \"$RAW_LOG_MAX_BYTES\" \"$RAW_STDERR_FULL\" > \"$RAW_STDERR\"\nelse\n  : > \"$RAW_STDERR\"\nfi\nrm -f \"$RAW_STDERR_FULL\"\nraw_stdout_bytes=$(wc -c < \"$RAW_STDOUT\" 2>/dev/null || printf '0')\nraw_stderr_bytes=$(wc -c < \"$RAW_STDERR\" 2>/dev/null || printf '0')\nprintf 'event=agent_end round=%s agent=%s exit_code=%s tail_exit_code=%s report=%s raw_stdout=%s raw_stdout_bytes=%s raw_stderr=%s raw_stderr_bytes=%s\n' \"$ROUND\" \"$AGENT\" \"$code\" \"$tail_code\" \"$REPORT_FILE\" \"$RAW_STDOUT\" \"$raw_stdout_bytes\" \"$RAW_STDERR\" \"$raw_stderr_bytes\" >> \"$AGENT_DIR/runner_status.log\"\nprintf 'agent_status round=%s agent=%s exit_code=%s tail_exit_code=%s report=%s raw_stdout=%s raw_stdout_bytes=%s raw_stderr=%s raw_stderr_bytes=%s\n' \"$ROUND\" \"$AGENT\" \"$code\" \"$tail_code\" \"$REPORT_FILE\" \"$RAW_STDOUT\" \"$raw_stdout_bytes\" \"$RAW_STDERR\" \"$raw_stderr_bytes\"\nexit \"$code\"",
+              "maxOutputBytes": 30000
+            },
+            {
+              "id": "agent_2_async",
+              "name": "Loss/schedule explorer",
+              "kind": "async_shell",
+              "jobId": "batched-neural-r{loop.iteration}-a2",
+              "dbPath": "{input.outputRoot}/jobs/batched-neural-repair-verification-loop.sqlite",
+              "outputDir": "{input.outputRoot}/jobs/round_{loop.iteration}/agent_2",
+              "pollIntervalMs": 10000,
+              "timeoutMs": 3600000,
+              "wait": true,
+              "allowFailure": true,
+              "command": "set -euo pipefail\nREPO_ROOT=$(git rev-parse --show-toplevel)\nROOT_INPUT=\"{input.outputRoot}\"\ncase \"$ROOT_INPUT\" in \"/\"*) ROOT=\"$ROOT_INPUT\" ;; *) ROOT=\"$REPO_ROOT/$ROOT_INPUT\" ;; esac\nAAC_SHARED_VENV=\"$(printenv AAC_SHARED_VENV || true)\"\nif [ -z \"$AAC_SHARED_VENV\" ]; then\n  AAC_SHARED_VENV=\"$ROOT/shared_venv\"\nfi\nexport AAC_SHARED_VENV\nexport UV_PROJECT_ENVIRONMENT=\"$AAC_SHARED_VENV\"\nexport VIRTUAL_ENV=\"$AAC_SHARED_VENV\"\nexport PATH=\"$AAC_SHARED_VENV/bin:$PATH\"\nexport UV_NO_SYNC=1\nROUND=\"{loop.iteration}\"\nAGENT=\"2\"\nAGENT_DIR=\"$ROOT/round_$ROUND/agent_$AGENT\"\nWORKTREE=\"$ROOT/worktrees/round_$ROUND/agent_$AGENT\"\nPROMPT_FILE=\"$AGENT_DIR/prompt.md\"\nREPORT_FILE=\"$AGENT_DIR/report.md\"\nRAW_STDOUT=\"$AGENT_DIR/pi_raw_tail.jsonl\"\nRAW_STDERR=\"$AGENT_DIR/pi_raw_stderr_tail.log\"\nRAW_STDERR_FULL=\"$AGENT_DIR/pi_raw_stderr.full.log\"\nRAW_LOG_MAX_BYTES=\"$(printenv RAW_LOG_MAX_BYTES || true)\"\nif [ -z \"$RAW_LOG_MAX_BYTES\" ]; then\n  RAW_LOG_MAX_BYTES=2000000\nfi\nexport AAC_WORKFLOW_ROOT=\"$ROOT\"\nexport AAC_SOURCE_WORKTREE=\"$ROOT/source/konrad_manual_sweep\"\nexport AAC_GPU_LOCK=\"$ROOT/gpu.lock\"\nexport AAC_CALIBRATION_JSON=\"$ROOT/state/capacity_calibration.json\"\nexport MPLCONFIGDIR=\"$ROOT/mplconfig\"\nmkdir -p \"$AGENT_DIR\" \"$MPLCONFIGDIR\"\nif [ ! -x \"$AAC_SHARED_VENV/bin/python\" ]; then\n  echo \"missing shared python: $AAC_SHARED_VENV/bin/python\" >&2\n  exit 2\nfi\nif [ ! -d \"$WORKTREE/.git\" ] && [ ! -f \"$WORKTREE/.git\" ]; then\n  echo \"missing worktree: $WORKTREE\" >&2\n  exit 2\nfi\nif [ ! -r \"$PROMPT_FILE\" ]; then\n  echo \"missing prompt: $PROMPT_FILE\" >&2\n  exit 2\nfi\nprintf 'shared_venv=%s python=%s gpu_lock=%s\n' \"$AAC_SHARED_VENV\" \"$AAC_SHARED_VENV/bin/python\" \"$AAC_GPU_LOCK\" > \"$AGENT_DIR/env_status.log\"\nprintf 'event=agent_start round=%s agent=%s worktree=%s prompt=%s\n' \"$ROUND\" \"$AGENT\" \"$WORKTREE\" \"$PROMPT_FILE\" > \"$AGENT_DIR/runner_status.log\"\ncd \"$WORKTREE\"\nset +e\ntimeout --foreground --kill-after=30s \"{input.agentTimeoutSeconds}s\"   pi --mode json -p --no-session --no-extensions --thinking high --tools read,write,edit,bash \"$(cat \"$PROMPT_FILE\")\"   2> \"$RAW_STDERR_FULL\" | tail -c \"$RAW_LOG_MAX_BYTES\" > \"$RAW_STDOUT\"\ncode=$PIPESTATUS\ntail_code=0\nset -e\nif [ -s \"$RAW_STDERR_FULL\" ]; then\n  tail -c \"$RAW_LOG_MAX_BYTES\" \"$RAW_STDERR_FULL\" > \"$RAW_STDERR\"\nelse\n  : > \"$RAW_STDERR\"\nfi\nrm -f \"$RAW_STDERR_FULL\"\nraw_stdout_bytes=$(wc -c < \"$RAW_STDOUT\" 2>/dev/null || printf '0')\nraw_stderr_bytes=$(wc -c < \"$RAW_STDERR\" 2>/dev/null || printf '0')\nprintf 'event=agent_end round=%s agent=%s exit_code=%s tail_exit_code=%s report=%s raw_stdout=%s raw_stdout_bytes=%s raw_stderr=%s raw_stderr_bytes=%s\n' \"$ROUND\" \"$AGENT\" \"$code\" \"$tail_code\" \"$REPORT_FILE\" \"$RAW_STDOUT\" \"$raw_stdout_bytes\" \"$RAW_STDERR\" \"$raw_stderr_bytes\" >> \"$AGENT_DIR/runner_status.log\"\nprintf 'agent_status round=%s agent=%s exit_code=%s tail_exit_code=%s report=%s raw_stdout=%s raw_stdout_bytes=%s raw_stderr=%s raw_stderr_bytes=%s\n' \"$ROUND\" \"$AGENT\" \"$code\" \"$tail_code\" \"$REPORT_FILE\" \"$RAW_STDOUT\" \"$raw_stdout_bytes\" \"$RAW_STDERR\" \"$raw_stderr_bytes\"\nexit \"$code\"",
+              "maxOutputBytes": 30000
+            },
+            {
+              "id": "agent_3_async",
+              "name": "Architecture/capacity explorer",
+              "kind": "async_shell",
+              "jobId": "batched-neural-r{loop.iteration}-a3",
+              "dbPath": "{input.outputRoot}/jobs/batched-neural-repair-verification-loop.sqlite",
+              "outputDir": "{input.outputRoot}/jobs/round_{loop.iteration}/agent_3",
+              "pollIntervalMs": 10000,
+              "timeoutMs": 3600000,
+              "wait": true,
+              "allowFailure": true,
+              "command": "set -euo pipefail\nREPO_ROOT=$(git rev-parse --show-toplevel)\nROOT_INPUT=\"{input.outputRoot}\"\ncase \"$ROOT_INPUT\" in \"/\"*) ROOT=\"$ROOT_INPUT\" ;; *) ROOT=\"$REPO_ROOT/$ROOT_INPUT\" ;; esac\nAAC_SHARED_VENV=\"$(printenv AAC_SHARED_VENV || true)\"\nif [ -z \"$AAC_SHARED_VENV\" ]; then\n  AAC_SHARED_VENV=\"$ROOT/shared_venv\"\nfi\nexport AAC_SHARED_VENV\nexport UV_PROJECT_ENVIRONMENT=\"$AAC_SHARED_VENV\"\nexport VIRTUAL_ENV=\"$AAC_SHARED_VENV\"\nexport PATH=\"$AAC_SHARED_VENV/bin:$PATH\"\nexport UV_NO_SYNC=1\nROUND=\"{loop.iteration}\"\nAGENT=\"3\"\nAGENT_DIR=\"$ROOT/round_$ROUND/agent_$AGENT\"\nWORKTREE=\"$ROOT/worktrees/round_$ROUND/agent_$AGENT\"\nPROMPT_FILE=\"$AGENT_DIR/prompt.md\"\nREPORT_FILE=\"$AGENT_DIR/report.md\"\nRAW_STDOUT=\"$AGENT_DIR/pi_raw_tail.jsonl\"\nRAW_STDERR=\"$AGENT_DIR/pi_raw_stderr_tail.log\"\nRAW_STDERR_FULL=\"$AGENT_DIR/pi_raw_stderr.full.log\"\nRAW_LOG_MAX_BYTES=\"$(printenv RAW_LOG_MAX_BYTES || true)\"\nif [ -z \"$RAW_LOG_MAX_BYTES\" ]; then\n  RAW_LOG_MAX_BYTES=2000000\nfi\nexport AAC_WORKFLOW_ROOT=\"$ROOT\"\nexport AAC_SOURCE_WORKTREE=\"$ROOT/source/konrad_manual_sweep\"\nexport AAC_GPU_LOCK=\"$ROOT/gpu.lock\"\nexport AAC_CALIBRATION_JSON=\"$ROOT/state/capacity_calibration.json\"\nexport MPLCONFIGDIR=\"$ROOT/mplconfig\"\nmkdir -p \"$AGENT_DIR\" \"$MPLCONFIGDIR\"\nif [ ! -x \"$AAC_SHARED_VENV/bin/python\" ]; then\n  echo \"missing shared python: $AAC_SHARED_VENV/bin/python\" >&2\n  exit 2\nfi\nif [ ! -d \"$WORKTREE/.git\" ] && [ ! -f \"$WORKTREE/.git\" ]; then\n  echo \"missing worktree: $WORKTREE\" >&2\n  exit 2\nfi\nif [ ! -r \"$PROMPT_FILE\" ]; then\n  echo \"missing prompt: $PROMPT_FILE\" >&2\n  exit 2\nfi\nprintf 'shared_venv=%s python=%s gpu_lock=%s\n' \"$AAC_SHARED_VENV\" \"$AAC_SHARED_VENV/bin/python\" \"$AAC_GPU_LOCK\" > \"$AGENT_DIR/env_status.log\"\nprintf 'event=agent_start round=%s agent=%s worktree=%s prompt=%s\n' \"$ROUND\" \"$AGENT\" \"$WORKTREE\" \"$PROMPT_FILE\" > \"$AGENT_DIR/runner_status.log\"\ncd \"$WORKTREE\"\nset +e\ntimeout --foreground --kill-after=30s \"{input.agentTimeoutSeconds}s\"   pi --mode json -p --no-session --no-extensions --thinking medium --tools read,write,edit,bash \"$(cat \"$PROMPT_FILE\")\"   2> \"$RAW_STDERR_FULL\" | tail -c \"$RAW_LOG_MAX_BYTES\" > \"$RAW_STDOUT\"\ncode=$PIPESTATUS\ntail_code=0\nset -e\nif [ -s \"$RAW_STDERR_FULL\" ]; then\n  tail -c \"$RAW_LOG_MAX_BYTES\" \"$RAW_STDERR_FULL\" > \"$RAW_STDERR\"\nelse\n  : > \"$RAW_STDERR\"\nfi\nrm -f \"$RAW_STDERR_FULL\"\nraw_stdout_bytes=$(wc -c < \"$RAW_STDOUT\" 2>/dev/null || printf '0')\nraw_stderr_bytes=$(wc -c < \"$RAW_STDERR\" 2>/dev/null || printf '0')\nprintf 'event=agent_end round=%s agent=%s exit_code=%s tail_exit_code=%s report=%s raw_stdout=%s raw_stdout_bytes=%s raw_stderr=%s raw_stderr_bytes=%s\n' \"$ROUND\" \"$AGENT\" \"$code\" \"$tail_code\" \"$REPORT_FILE\" \"$RAW_STDOUT\" \"$raw_stdout_bytes\" \"$RAW_STDERR\" \"$raw_stderr_bytes\" >> \"$AGENT_DIR/runner_status.log\"\nprintf 'agent_status round=%s agent=%s exit_code=%s tail_exit_code=%s report=%s raw_stdout=%s raw_stdout_bytes=%s raw_stderr=%s raw_stderr_bytes=%s\n' \"$ROUND\" \"$AGENT\" \"$code\" \"$tail_code\" \"$REPORT_FILE\" \"$RAW_STDOUT\" \"$raw_stdout_bytes\" \"$RAW_STDERR\" \"$raw_stderr_bytes\"\nexit \"$code\"",
+              "maxOutputBytes": 30000
+            },
+            {
+              "id": "agent_4_async",
+              "name": "Repair/verification explorer",
+              "kind": "async_shell",
+              "jobId": "batched-neural-r{loop.iteration}-a4",
+              "dbPath": "{input.outputRoot}/jobs/batched-neural-repair-verification-loop.sqlite",
+              "outputDir": "{input.outputRoot}/jobs/round_{loop.iteration}/agent_4",
+              "pollIntervalMs": 10000,
+              "timeoutMs": 3600000,
+              "wait": true,
+              "allowFailure": true,
+              "command": "set -euo pipefail\nREPO_ROOT=$(git rev-parse --show-toplevel)\nROOT_INPUT=\"{input.outputRoot}\"\ncase \"$ROOT_INPUT\" in \"/\"*) ROOT=\"$ROOT_INPUT\" ;; *) ROOT=\"$REPO_ROOT/$ROOT_INPUT\" ;; esac\nAAC_SHARED_VENV=\"$(printenv AAC_SHARED_VENV || true)\"\nif [ -z \"$AAC_SHARED_VENV\" ]; then\n  AAC_SHARED_VENV=\"$ROOT/shared_venv\"\nfi\nexport AAC_SHARED_VENV\nexport UV_PROJECT_ENVIRONMENT=\"$AAC_SHARED_VENV\"\nexport VIRTUAL_ENV=\"$AAC_SHARED_VENV\"\nexport PATH=\"$AAC_SHARED_VENV/bin:$PATH\"\nexport UV_NO_SYNC=1\nROUND=\"{loop.iteration}\"\nAGENT=\"4\"\nAGENT_DIR=\"$ROOT/round_$ROUND/agent_$AGENT\"\nWORKTREE=\"$ROOT/worktrees/round_$ROUND/agent_$AGENT\"\nPROMPT_FILE=\"$AGENT_DIR/prompt.md\"\nREPORT_FILE=\"$AGENT_DIR/report.md\"\nRAW_STDOUT=\"$AGENT_DIR/pi_raw_tail.jsonl\"\nRAW_STDERR=\"$AGENT_DIR/pi_raw_stderr_tail.log\"\nRAW_STDERR_FULL=\"$AGENT_DIR/pi_raw_stderr.full.log\"\nRAW_LOG_MAX_BYTES=\"$(printenv RAW_LOG_MAX_BYTES || true)\"\nif [ -z \"$RAW_LOG_MAX_BYTES\" ]; then\n  RAW_LOG_MAX_BYTES=2000000\nfi\nexport AAC_WORKFLOW_ROOT=\"$ROOT\"\nexport AAC_SOURCE_WORKTREE=\"$ROOT/source/konrad_manual_sweep\"\nexport AAC_GPU_LOCK=\"$ROOT/gpu.lock\"\nexport AAC_CALIBRATION_JSON=\"$ROOT/state/capacity_calibration.json\"\nexport MPLCONFIGDIR=\"$ROOT/mplconfig\"\nmkdir -p \"$AGENT_DIR\" \"$MPLCONFIGDIR\"\nif [ ! -x \"$AAC_SHARED_VENV/bin/python\" ]; then\n  echo \"missing shared python: $AAC_SHARED_VENV/bin/python\" >&2\n  exit 2\nfi\nif [ ! -d \"$WORKTREE/.git\" ] && [ ! -f \"$WORKTREE/.git\" ]; then\n  echo \"missing worktree: $WORKTREE\" >&2\n  exit 2\nfi\nif [ ! -r \"$PROMPT_FILE\" ]; then\n  echo \"missing prompt: $PROMPT_FILE\" >&2\n  exit 2\nfi\nprintf 'shared_venv=%s python=%s gpu_lock=%s\n' \"$AAC_SHARED_VENV\" \"$AAC_SHARED_VENV/bin/python\" \"$AAC_GPU_LOCK\" > \"$AGENT_DIR/env_status.log\"\nprintf 'event=agent_start round=%s agent=%s worktree=%s prompt=%s\n' \"$ROUND\" \"$AGENT\" \"$WORKTREE\" \"$PROMPT_FILE\" > \"$AGENT_DIR/runner_status.log\"\ncd \"$WORKTREE\"\nset +e\ntimeout --foreground --kill-after=30s \"{input.agentTimeoutSeconds}s\"   pi --mode json -p --no-session --no-extensions --thinking xhigh --tools read,write,edit,bash \"$(cat \"$PROMPT_FILE\")\"   2> \"$RAW_STDERR_FULL\" | tail -c \"$RAW_LOG_MAX_BYTES\" > \"$RAW_STDOUT\"\ncode=$PIPESTATUS\ntail_code=0\nset -e\nif [ -s \"$RAW_STDERR_FULL\" ]; then\n  tail -c \"$RAW_LOG_MAX_BYTES\" \"$RAW_STDERR_FULL\" > \"$RAW_STDERR\"\nelse\n  : > \"$RAW_STDERR\"\nfi\nrm -f \"$RAW_STDERR_FULL\"\nraw_stdout_bytes=$(wc -c < \"$RAW_STDOUT\" 2>/dev/null || printf '0')\nraw_stderr_bytes=$(wc -c < \"$RAW_STDERR\" 2>/dev/null || printf '0')\nprintf 'event=agent_end round=%s agent=%s exit_code=%s tail_exit_code=%s report=%s raw_stdout=%s raw_stdout_bytes=%s raw_stderr=%s raw_stderr_bytes=%s\n' \"$ROUND\" \"$AGENT\" \"$code\" \"$tail_code\" \"$REPORT_FILE\" \"$RAW_STDOUT\" \"$raw_stdout_bytes\" \"$RAW_STDERR\" \"$raw_stderr_bytes\" >> \"$AGENT_DIR/runner_status.log\"\nprintf 'agent_status round=%s agent=%s exit_code=%s tail_exit_code=%s report=%s raw_stdout=%s raw_stdout_bytes=%s raw_stderr=%s raw_stderr_bytes=%s\n' \"$ROUND\" \"$AGENT\" \"$code\" \"$tail_code\" \"$REPORT_FILE\" \"$RAW_STDOUT\" \"$raw_stdout_bytes\" \"$RAW_STDERR\" \"$raw_stderr_bytes\"\nexit \"$code\"",
+              "maxOutputBytes": 30000
+            }
+          ]
+        },
+        {
+          "id": "collect_round_outputs",
+          "name": "Collect reports and logs; failures are search evidence",
+          "kind": "shell",
+          "command": "set -euo pipefail\nREPO_ROOT=$(git rev-parse --show-toplevel)\nROOT_INPUT=\"{input.outputRoot}\"\ncase \"$ROOT_INPUT\" in \"/\"*) ROOT=\"$ROOT_INPUT\" ;; *) ROOT=\"$REPO_ROOT/$ROOT_INPUT\" ;; esac\nAAC_SHARED_VENV=\"$(printenv AAC_SHARED_VENV || true)\"\nif [ -z \"$AAC_SHARED_VENV\" ]; then\n  AAC_SHARED_VENV=\"$ROOT/shared_venv\"\nfi\nexport AAC_SHARED_VENV\nexport UV_PROJECT_ENVIRONMENT=\"$AAC_SHARED_VENV\"\nexport VIRTUAL_ENV=\"$AAC_SHARED_VENV\"\nexport PATH=\"$AAC_SHARED_VENV/bin:$PATH\"\nexport UV_NO_SYNC=1\nPY=\"$AAC_SHARED_VENV/bin/python\"\nHELPER=\"$REPO_ROOT/.pi/scripts/batched_neural_workflow.py\"\nif [ ! -x \"$PY\" ]; then\n  echo \"missing shared venv python: $PY\" >&2\n  echo \"workflow preflight must run uv sync --frozen before later steps\" >&2\n  exit 2\nfi\n\"$PY\" \"$HELPER\" collect-round --root \"$ROOT\" --iteration \"{loop.iteration}\"\n",
+          "timeoutMs": 120000,
+          "maxOutputBytes": 60000
+        },
+        {
+          "id": "reflect_and_spawn",
+          "name": "Reflect on four outputs and emit four next instructions",
+          "kind": "agent",
+          "thinking": "xhigh",
+          "tools": [
+            "read",
+            "write"
+          ],
+          "expectJson": true,
+          "retries": 1,
+          "prompt": "You are the reflection agent for round {loop.iteration}/{loop.total}. Read design_brief.md, inventory.json, capacity_calibration.json, round_status.json, round_summary_input.md, previous_reflection.json, and prior_sibling_summaries.md under {input.outputRoot}. Objective: drive toward verified below-{input.targetPct}% almost-5-coloring. Prioritize actual summary.csv rows, repair outputs, exact commands, and negative evidence. Keep four lines alive: geometry, loss/schedule, architecture/capacity, repair/verification. Write valid JSON to {input.outputRoot}/round_{loop.iteration}/reflection.json and return it. Exact keys only: round_summary, best_findings, rejected_or_weak_findings, risks, runner_plan, agent_1, agent_2, agent_3, agent_4. Arrays for best_findings/rejected_or_weak_findings/risks. Return JSON only.",
+          "maxOutputBytes": 50000
+        },
+        {
+          "id": "validate_reflection_and_update_state",
+          "name": "Validate reflection and install next instructions",
+          "kind": "shell",
+          "command": "set -euo pipefail\nREPO_ROOT=$(git rev-parse --show-toplevel)\nROOT_INPUT=\"{input.outputRoot}\"\ncase \"$ROOT_INPUT\" in \"/\"*) ROOT=\"$ROOT_INPUT\" ;; *) ROOT=\"$REPO_ROOT/$ROOT_INPUT\" ;; esac\nAAC_SHARED_VENV=\"$(printenv AAC_SHARED_VENV || true)\"\nif [ -z \"$AAC_SHARED_VENV\" ]; then\n  AAC_SHARED_VENV=\"$ROOT/shared_venv\"\nfi\nexport AAC_SHARED_VENV\nexport UV_PROJECT_ENVIRONMENT=\"$AAC_SHARED_VENV\"\nexport VIRTUAL_ENV=\"$AAC_SHARED_VENV\"\nexport PATH=\"$AAC_SHARED_VENV/bin:$PATH\"\nexport UV_NO_SYNC=1\nPY=\"$AAC_SHARED_VENV/bin/python\"\nHELPER=\"$REPO_ROOT/.pi/scripts/batched_neural_workflow.py\"\nif [ ! -x \"$PY\" ]; then\n  echo \"missing shared venv python: $PY\" >&2\n  echo \"workflow preflight must run uv sync --frozen before later steps\" >&2\n  exit 2\nfi\n\"$PY\" \"$HELPER\" validate-reflection --root \"$ROOT\" --iteration \"{loop.iteration}\"\n",
+          "timeoutMs": 60000,
+          "maxOutputBytes": 20000
+        }
+      ]
+    },
+    {
+      "id": "final_synthesis",
+      "name": "Final campaign synthesis and final fanout plan",
+      "kind": "agent",
+      "thinking": "xhigh",
+      "tools": [
+        "read",
+        "write"
+      ],
+      "prompt": "Produce final synthesis for the campaign. Read design_brief.md, inventory.json, capacity_calibration.json, all round reflections and summaries under {input.outputRoot}, and relevant reports. Write {input.outputRoot}/final_synthesis.md with strongest candidates, commands, failed ideas, promoted artifacts, repair/verification status, and whether anything credibly approaches or beats {input.targetPct}%. Also write valid JSON to {input.outputRoot}/final_fanout_plan.json with keys: summary, recommended_array_jobs, candidate_families, promotion_gates, risks. recommended_array_jobs should describe concrete sbatch-array style experiment families for many seeds/parallelogram jitters, but do not claim they were submitted unless an artifact proves it.",
+      "maxOutputBytes": 50000
+    },
+    {
+      "id": "validate_final_synthesis",
+      "name": "Validate final synthesis and fanout plan",
+      "kind": "shell",
+      "command": "set -euo pipefail\nREPO_ROOT=$(git rev-parse --show-toplevel)\nROOT_INPUT=\"{input.outputRoot}\"\ncase \"$ROOT_INPUT\" in \"/\"*) ROOT=\"$ROOT_INPUT\" ;; *) ROOT=\"$REPO_ROOT/$ROOT_INPUT\" ;; esac\nAAC_SHARED_VENV=\"$(printenv AAC_SHARED_VENV || true)\"\nif [ -z \"$AAC_SHARED_VENV\" ]; then\n  AAC_SHARED_VENV=\"$ROOT/shared_venv\"\nfi\nexport AAC_SHARED_VENV\nexport UV_PROJECT_ENVIRONMENT=\"$AAC_SHARED_VENV\"\nexport VIRTUAL_ENV=\"$AAC_SHARED_VENV\"\nexport PATH=\"$AAC_SHARED_VENV/bin:$PATH\"\nexport UV_NO_SYNC=1\nPY=\"$AAC_SHARED_VENV/bin/python\"\nHELPER=\"$REPO_ROOT/.pi/scripts/batched_neural_workflow.py\"\nif [ ! -x \"$PY\" ]; then\n  echo \"missing shared venv python: $PY\" >&2\n  echo \"workflow preflight must run uv sync --frozen before later steps\" >&2\n  exit 2\nfi\n\"$PY\" \"$HELPER\" validate-final --root \"$ROOT\"\n",
+      "timeoutMs": 60000,
+      "maxOutputBytes": 20000
+    }
+  ]
+}
