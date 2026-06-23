@@ -18,6 +18,74 @@ def write_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data, indent=2, sort_keys=True))
 
 
+def extract_jsonish(text: str) -> str:
+    stripped = text.strip()
+    fenced = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", stripped, flags=re.IGNORECASE)
+    if fenced:
+        stripped = fenced.group(1).strip()
+    if stripped.startswith("{") and stripped.endswith("}"):
+        return stripped
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start != -1 and end > start:
+        return stripped[start : end + 1]
+    return stripped
+
+
+def repair_json_escapes(text: str) -> str:
+    # Agent-authored command strings often contain shell escapes such as \',
+    # which are invalid JSON escapes. Preserve valid JSON escapes and double
+    # everything else so the text remains literal inside strings.
+    return re.sub(r'\\(?!["\\/bfnrtu])', r"\\\\", text)
+
+
+def read_jsonish_file(path: Path) -> dict:
+    raw = path.read_text(errors="replace")
+    candidate = extract_jsonish(raw)
+    try:
+        data = json.loads(candidate)
+    except json.JSONDecodeError:
+        data = json.loads(repair_json_escapes(candidate))
+    if not isinstance(data, dict):
+        raise SystemExit("JSON artifact must be an object: " + str(path))
+    return data
+
+
+def markdown_value(value: object, depth: int = 0) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        lines = []
+        for key, item in value.items():
+            label = str(key).replace("_", " ")
+            rendered = markdown_value(item, depth + 1)
+            if "\n" in rendered:
+                lines.append("- " + label + ":")
+                lines.extend("  " + line if line else "" for line in rendered.splitlines())
+            else:
+                lines.append("- " + label + ": " + rendered)
+        return "\n".join(lines).strip()
+    if isinstance(value, list):
+        lines = []
+        for item in value:
+            rendered = markdown_value(item, depth + 1)
+            if "\n" in rendered:
+                lines.append("-")
+                lines.extend("  " + line if line else "" for line in rendered.splitlines())
+            else:
+                lines.append("- " + rendered)
+        return "\n".join(lines).strip()
+    return str(value).strip()
+
+
+def normalize_list(value: object) -> list:
+    if isinstance(value, list):
+        return value
+    if value is None:
+        return []
+    return [value]
+
+
 def run(args: list[str], cwd: Path, allow_failure: bool = False) -> str:
     proc = subprocess.run(args, cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     if proc.returncode != 0 and not allow_failure:
@@ -350,17 +418,24 @@ def cmd_validate_seed(args: argparse.Namespace) -> None:
     path = root / "state" / "seed_instructions.json"
     if not path.exists():
         raise SystemExit("seed instruction file missing: " + str(path))
-    data = json.loads(path.read_text())
+    data = read_jsonish_file(path)
     required = ["round_summary", "best_findings", "rejected_or_weak_findings", "risks", "agent_1", "agent_2", "agent_3", "agent_4"]
-    if set(data.keys()) != set(required):
-        raise SystemExit("seed JSON must contain exactly " + str(required) + "; got " + str(sorted(data.keys())))
+    missing = [key for key in required if key not in data]
+    if missing:
+        raise SystemExit("seed JSON missing required keys " + str(missing) + "; got " + str(sorted(data.keys())))
+    normalized = {key: data[key] for key in required}
+    for key in ["best_findings", "rejected_or_weak_findings", "risks"]:
+        normalized[key] = normalize_list(normalized.get(key))
+    for key in ["agent_1", "agent_2", "agent_3", "agent_4"]:
+        normalized[key] = markdown_value(normalized.get(key))
+        if not normalized[key]:
+            raise SystemExit(key + " must be non-empty after normalization")
+    write_json(path, normalized)
     cur = root / "state" / "current_instructions"
     cur.mkdir(parents=True, exist_ok=True)
     for k in range(1, 5):
         key = "agent_" + str(k)
-        if not isinstance(data.get(key), str) or not data[key].strip():
-            raise SystemExit(key + " must be a non-empty string")
-        (cur / (key + ".md")).write_text(data[key].strip() + "\n")
+        (cur / (key + ".md")).write_text(normalized[key].strip() + "\n")
     shutil.copyfile(path, root / "state" / "previous_reflection.json")
     print(json.dumps({"seed_instructions": str(path), "current_instruction_dir": str(cur)}, indent=2, sort_keys=True))
 
@@ -549,21 +624,24 @@ def cmd_validate_reflection(args: argparse.Namespace) -> None:
     path = root / ("round_" + str(r)) / "reflection.json"
     if not path.exists():
         raise SystemExit("reflection JSON missing: " + str(path))
-    data = json.loads(path.read_text())
+    data = read_jsonish_file(path)
     required = ["round_summary", "best_findings", "rejected_or_weak_findings", "risks", "runner_plan", "agent_1", "agent_2", "agent_3", "agent_4"]
-    if set(data.keys()) != set(required):
-        raise SystemExit("reflection JSON must contain exactly " + str(required) + "; got " + str(sorted(data.keys())))
+    missing = [key for key in required if key not in data]
+    if missing:
+        raise SystemExit("reflection JSON missing required keys " + str(missing) + "; got " + str(sorted(data.keys())))
+    normalized = {key: data[key] for key in required}
     for key in ["round_summary", "runner_plan", "agent_1", "agent_2", "agent_3", "agent_4"]:
-        if not isinstance(data.get(key), str) or not data[key].strip():
-            raise SystemExit(key + " must be a non-empty string")
+        normalized[key] = markdown_value(normalized.get(key))
+        if not normalized[key]:
+            raise SystemExit(key + " must be non-empty after normalization")
     for key in ["best_findings", "rejected_or_weak_findings", "risks"]:
-        if not isinstance(data.get(key), list):
-            raise SystemExit(key + " must be a list")
+        normalized[key] = normalize_list(normalized.get(key))
+    write_json(path, normalized)
     cur = root / "state" / "current_instructions"
     cur.mkdir(parents=True, exist_ok=True)
     for k in range(1, 5):
         key = "agent_" + str(k)
-        (cur / (key + ".md")).write_text(data[key].strip() + "\n")
+        (cur / (key + ".md")).write_text(normalized[key].strip() + "\n")
     shutil.copyfile(path, root / "state" / "previous_reflection.json")
     print(json.dumps({"round": r, "reflection": str(path), "next_instruction_dir": str(cur)}, indent=2, sort_keys=True))
 
