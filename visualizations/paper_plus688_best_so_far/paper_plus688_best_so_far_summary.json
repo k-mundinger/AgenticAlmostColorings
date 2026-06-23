@@ -1,0 +1,20 @@
+{
+  "name": "paper_plus688_best_so_far",
+  "grid_shape": [
+    1945,
+    1970
+  ],
+  "total_cells": 3831650,
+  "paper_bonus_cells": 143135,
+  "patched_bonus_cells": 142447,
+  "net_bonus_reduction": 688,
+  "bonus_density_percent": 3.7176412250597,
+  "real_colored_density_percent": 96.2823587749403,
+  "diff_rows": 5828,
+  "fills_5_to_real": 3176,
+  "vacates_real_to_5": 2488,
+  "real_recolors": 164,
+  "source_diff": "/scratch/htc/npelleriti/pi-sandbox/papers-concept-exploration-loop/job_1337025/worktrees/round_11/agent_1/explorations/round11_agent1/consolidation/outputs/canonical_plus688_diff_vs_paper.csv",
+  "source_diff_sha256": "84b70af0053f368b55ccf6bd8cc5617314184721269751a7979ca3ca287d3668",
+  "output_pdf": "/home/htc/npelleriti/AgenticAlmostColorings/visualizations/paper_plus688_best_so_far/paper_plus688_best_so_far.pdf"
+}
