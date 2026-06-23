@@ -86,6 +86,31 @@ def normalize_list(value: object) -> list:
     return [value]
 
 
+def scope_agent_instruction(text: str, root: Path, round_dir: Path, agent_dir: Path, worktree: Path, gpu_lock: Path, agent_index: int) -> str:
+    round_name = round_dir.name
+    scoped = text
+    scoped = scoped.replace(str(root / "source" / "konrad_manual_sweep"), str(worktree))
+    scoped = scoped.replace(str(root / "state" / "gpu.flock"), str(gpu_lock))
+    scoped = scoped.replace(str(root / "state" / "gpu.lock"), str(gpu_lock))
+    scoped = scoped.replace(str(root / "round_00"), str(round_dir))
+    scoped = scoped.replace("round_00", round_name)
+    scoped = re.sub(
+        re.escape(str(round_dir)) + r"/agent_" + str(agent_index) + r"_[A-Za-z0-9_.-]+",
+        str(agent_dir / "experiments"),
+        scoped,
+    )
+    scoped = scoped.replace(str(round_dir / "mask_cache"), str(agent_dir / "mask_cache"))
+    prefix = [
+        "SCOPING OVERRIDE FOR THIS ROUND:",
+        "- Repository modifications must happen only in the assigned worktree: " + str(worktree),
+        "- Experiment outputs for this agent must stay under: " + str(agent_dir / "experiments"),
+        "- GPU work must use this lock path: " + str(gpu_lock),
+        "- If any stale source-worktree, round_00, or alternate lock path remains below, translate it to the paths above.",
+        "",
+    ]
+    return "\n".join(prefix) + scoped.strip()
+
+
 def run(args: list[str], cwd: Path, allow_failure: bool = False) -> str:
     proc = subprocess.run(args, cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     if proc.returncode != 0 and not allow_failure:
@@ -479,7 +504,8 @@ def cmd_round_preflight(args: argparse.Namespace) -> None:
         if helper_src.exists():
             helper_dst.write_text(helper_src.read_text())
             helper_dst.chmod(0o755)
-        instr_text = (cur / (agent_name + ".md")).read_text().strip()
+        raw_instr_text = (cur / (agent_name + ".md")).read_text().strip()
+        instr_text = scope_agent_instruction(raw_instr_text, root, round_dir, agent_dir, wt, gpu_lock, k)
         (agent_dir / "instruction.md").write_text(instr_text + "\n")
         prompt_lines = [
             "You are explorer agent " + str(k) + " for round " + str(r) + " of the batched-neural-repair-verification-loop workflow.",
