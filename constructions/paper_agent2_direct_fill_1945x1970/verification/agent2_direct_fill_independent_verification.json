@@ -1,0 +1,62 @@
+{
+  "baseline_directed_conflicts_by_color": {
+    "0": 0,
+    "1": 0,
+    "2": 0,
+    "3": 0,
+    "4": 0
+  },
+  "baseline_directed_conflicts_total": 0,
+  "bonus_count_after": 143044,
+  "bonus_count_before": 143135,
+  "bonus_fraction_after": 0.03733221980086908,
+  "bonus_fraction_before": 0.03735596936045829,
+  "bonus_reduction": 91,
+  "changes": 91,
+  "diff_csv": "constructions/paper_agent2_direct_fill_1945x1970/verification/agent2_direct_fill_diff.csv",
+  "diff_sha256": "4a0d5b0b26264f68fd7f4f2d2b1e243ce95ec50799a4add2577c5a19c2353ed7",
+  "elapsed_seconds": 12.138928651809692,
+  "fft_seconds": 3.748540163040161,
+  "grid_csv": "constructions/paper_almost_5_coloring_2d/grid.csv",
+  "grid_sha256": "d85a38934ce3d54870fd322662087e0e6fd58c9e38d8b8e529967a7c6f5788df",
+  "local_changed_cell_check": {
+    "conflict_checks": 844480,
+    "conflict_count": 0,
+    "examples": []
+  },
+  "mask_seconds": 7.550687074661255,
+  "mask_size": 9280,
+  "max_diff_coordinate_error": 4.997580127508172e-11,
+  "old_color_counts": {
+    "0": 787790,
+    "1": 656953,
+    "2": 788588,
+    "3": 832312,
+    "4": 622872,
+    "5": 143135
+  },
+  "parallelogram_csv": "constructions/paper_agent2_direct_fill_1945x1970/parallelogram.csv",
+  "parallelogram_sha256": "c553eaab020538bafb471832f7de52050224c10e3448bae6cb35929da3524a5d",
+  "patched_color_counts": {
+    "0": 787791,
+    "1": 656979,
+    "2": 788605,
+    "3": 832336,
+    "4": 622895,
+    "5": 143044
+  },
+  "patched_directed_conflicts_by_color": {
+    "0": 0,
+    "1": 0,
+    "2": 0,
+    "3": 0,
+    "4": 0
+  },
+  "patched_directed_conflicts_total": 0,
+  "radius": 1.0,
+  "shape": [
+    1945,
+    1970
+  ],
+  "success": true
+}

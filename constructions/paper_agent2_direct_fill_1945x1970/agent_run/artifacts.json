@@ -1,0 +1,39 @@
+{
+  "artifacts": [
+    {
+      "path": "experiments/paper_local_search/analyze_paper_grid.py",
+      "kind": "script",
+      "description": "Parser, rectangular unit-distance mask builder, FFT verifier, and local-search probes grounded in paper grid/parallelogram."
+    },
+    {
+      "path": "experiments/paper_local_search/out/analysis_summary.json",
+      "kind": "summary",
+      "description": "Combined full-resolution and 5x-subsample experiment summary."
+    },
+    {
+      "path": "experiments/paper_local_search/out/full_1945x1970_direct_fill_candidate_diff.csv",
+      "kind": "candidate_diff",
+      "description": "91 accepted bonus-to-real fills; verified by script to keep zero same-color unit-distance conflicts."
+    },
+    {
+      "path": "experiments/paper_local_search/out/full_1945x1970_direct_fill_candidate_diff.json",
+      "kind": "candidate_diff",
+      "description": "JSON version of the 91-fill candidate including verification metadata."
+    },
+    {
+      "path": "experiments/paper_local_search/out/full_1945x1970_one_step_candidate_verification.json",
+      "kind": "candidate_diff_verification",
+      "description": "Separate two-cell one-step repair, verified alone to keep zero conflicts."
+    },
+    {
+      "path": "experiments/paper_local_search/out/full_1945x1970_summary.json",
+      "kind": "summary",
+      "description": "Full-resolution mask, conflict, safety, and local-search summary."
+    },
+    {
+      "path": "experiments/paper_local_search/out/subsample_every_5_389x394_summary.json",
+      "kind": "negative_evidence",
+      "description": "5x coarsened subsample results showing many conflicts and no safe single fills."
+    }
+  ]
+}

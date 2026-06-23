@@ -1,0 +1,465 @@
+{
+  "device": "cpu",
+  "grid_path": "/workspace/constructions/paper_almost_5_coloring_2d/grid.csv",
+  "parallelogram_path": "/workspace/constructions/paper_almost_5_coloring_2d/parallelogram.csv",
+  "parser": {
+    "bonus_count": 143135,
+    "bonus_fraction": 0.03735596936045829,
+    "counts": {
+      "0": 787790,
+      "1": 656953,
+      "2": 788588,
+      "3": 832312,
+      "4": 622872,
+      "5": 143135
+    },
+    "grid_path": "/workspace/constructions/paper_almost_5_coloring_2d/grid.csv",
+    "max_abs_coord_error": 8.809056151193317e-07,
+    "max_error_row": {
+      "expected_x": -2.110408311721373,
+      "expected_y": 4.171870880905615,
+      "i": 1568,
+      "idx": 3090074,
+      "j": 1114,
+      "x": -2.110408,
+      "y": 4.17187
+    },
+    "npy_path": "experiments/paper_local_search/out/paper_colors_1945x1970.npy",
+    "parse_seconds": 28.32531397906132,
+    "row_order": "i=v1 index outer, j=v2 index inner; coordinate=i*v1/1945+j*v2/1970",
+    "sample_errors": [
+      {
+        "color": 3,
+        "error": 0.0,
+        "i": 0,
+        "idx": 0,
+        "j": 0
+      },
+      {
+        "color": 3,
+        "error": 2.563451783742926e-11,
+        "i": 0,
+        "idx": 1,
+        "j": 1
+      },
+      {
+        "color": 3,
+        "error": 1.375634515153601e-10,
+        "i": 0,
+        "idx": 2,
+        "j": 2
+      },
+      {
+        "color": 3,
+        "error": 1.7208121816381095e-07,
+        "i": 0,
+        "idx": 1969,
+        "j": 1969
+      },
+      {
+        "color": 3,
+        "error": 1.1979434458297966e-10,
+        "i": 1,
+        "idx": 1970,
+        "j": 0
+      },
+      {
+        "color": 3,
+        "error": 2.190954289105207e-07,
+        "i": 1944,
+        "idx": 3831649,
+        "j": 1969
+      }
+    ],
+    "shape": [
+      1945,
+      1970
+    ]
+  },
+  "runs": [
+    {
+      "bonus_fraction": 0.03735596936045829,
+      "color_counts": {
+        "0": 787790,
+        "1": 656953,
+        "2": 788588,
+        "3": 832312,
+        "4": 622872,
+        "5": 143135
+      },
+      "conflicts": {
+        "directed_same_color_hits_by_real_color": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 0
+        },
+        "total_directed_same_color_hits": 0,
+        "undirected_same_color_edges_if_symmetric": 0.0
+      },
+      "greedy_direct_bonus_fill": {
+        "accepted_fills": 91,
+        "bonus_reduction": 91,
+        "candidate_safe_bonus_cells": 190,
+        "rejected_due_to_new_fill_conflict": 99
+      },
+      "greedy_direct_bonus_fill_verification": {
+        "bonus_count_after_fill": 143044,
+        "bonus_fraction_after_fill": 0.03733221980086908,
+        "directed_same_color_hits_by_real_color_after_fill": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 0
+        },
+        "total_directed_same_color_hits_after_fill": 0,
+        "verified_conflict_free": true
+      },
+      "mask": {
+        "cache_path": "experiments/paper_local_search/out/mask_cache/mask_1945x1970_-0.17407057__3.8842025__-3.48389____1.8401014.npy",
+        "loaded_cache": true,
+        "mask_size": 9280
+      },
+      "name": "full_1945x1970",
+      "negative_boundary_examples": [
+        {
+          "adjacent_real_colors": [
+            1
+          ],
+          "bonus_cell": [
+            1870,
+            885
+          ],
+          "conflicts_if_recolored_to_least_bad_adjacent_color": 5,
+          "least_bad_adjacent_color": 1,
+          "min_conflicts_over_all_real_colors": 5
+        },
+        {
+          "adjacent_real_colors": [
+            2
+          ],
+          "bonus_cell": [
+            1500,
+            369
+          ],
+          "conflicts_if_recolored_to_least_bad_adjacent_color": 41,
+          "least_bad_adjacent_color": 2,
+          "min_conflicts_over_all_real_colors": 41
+        },
+        {
+          "adjacent_real_colors": [
+            0
+          ],
+          "bonus_cell": [
+            1272,
+            22
+          ],
+          "conflicts_if_recolored_to_least_bad_adjacent_color": 27,
+          "least_bad_adjacent_color": 0,
+          "min_conflicts_over_all_real_colors": 27
+        },
+        {
+          "adjacent_real_colors": [
+            2
+          ],
+          "bonus_cell": [
+            188,
+            140
+          ],
+          "conflicts_if_recolored_to_least_bad_adjacent_color": 23,
+          "least_bad_adjacent_color": 2,
+          "min_conflicts_over_all_real_colors": 23
+        }
+      ],
+      "one_step_bonus_repair_search": {
+        "bonus_reduction": 1,
+        "changes": [
+          {
+            "i": 579,
+            "j": 580,
+            "new": 0,
+            "old": 5
+          },
+          {
+            "i": 1,
+            "j": 844,
+            "new": 1,
+            "old": 0
+          }
+        ],
+        "found": true,
+        "tested_target_assignments": 33
+      },
+      "shape": [
+        1945,
+        1970
+      ],
+      "single_cell_recolor_safety": {
+        "bonus_cells": 143135,
+        "min_blockers_histogram_capped_20": {
+          "0": 190,
+          "1": 482,
+          "10": 309,
+          "11": 312,
+          "12": 311,
+          "13": 248,
+          "14": 305,
+          "15": 266,
+          "16": 289,
+          "17": 274,
+          "18": 306,
+          "19": 249,
+          "2": 617,
+          "20+": 135790,
+          "3": 484,
+          "4": 432,
+          "5": 799,
+          "6": 426,
+          "7": 381,
+          "8": 358,
+          "9": 307
+        },
+        "min_blockers_mean": 402.6191287944947,
+        "min_blockers_median": 340.0,
+        "min_blockers_min": 0,
+        "safe_counts_by_color": {
+          "0": 2,
+          "1": 55,
+          "2": 34,
+          "3": 49,
+          "4": 50
+        },
+        "single_recolorable_bonus_cells": 190
+      }
+    },
+    {
+      "bonus_fraction": 0.03751647462581394,
+      "color_counts": {
+        "0": 31503,
+        "1": 26284,
+        "2": 31550,
+        "3": 33286,
+        "4": 24893,
+        "5": 5750
+      },
+      "conflicts": {
+        "directed_same_color_hits_by_real_color": {
+          "0": 6224,
+          "1": 2128,
+          "2": 9106,
+          "3": 9482,
+          "4": 3650
+        },
+        "total_directed_same_color_hits": 30590,
+        "undirected_same_color_edges_if_symmetric": 15295.0
+      },
+      "greedy_direct_bonus_fill": {
+        "accepted_fills": 0,
+        "bonus_reduction": 0,
+        "candidate_safe_bonus_cells": 0,
+        "rejected_due_to_new_fill_conflict": 0
+      },
+      "greedy_direct_bonus_fill_verification": null,
+      "mask": {
+        "cache_path": "experiments/paper_local_search/out/mask_cache/mask_389x394_-0.17407057__3.8842025__-3.48389____1.8401014.npy",
+        "loaded_cache": true,
+        "mask_size": 1856
+      },
+      "name": "subsample_every_5_389x394",
+      "negative_boundary_examples": [
+        {
+          "adjacent_real_colors": [
+            0
+          ],
+          "bonus_cell": [
+            183,
+            365
+          ],
+          "conflicts_if_recolored_to_least_bad_adjacent_color": 54,
+          "least_bad_adjacent_color": 0,
+          "min_conflicts_over_all_real_colors": 54
+        },
+        {
+          "adjacent_real_colors": [
+            3
+          ],
+          "bonus_cell": [
+            301,
+            272
+          ],
+          "conflicts_if_recolored_to_least_bad_adjacent_color": 39,
+          "least_bad_adjacent_color": 3,
+          "min_conflicts_over_all_real_colors": 39
+        },
+        {
+          "adjacent_real_colors": [
+            4
+          ],
+          "bonus_cell": [
+            175,
+            173
+          ],
+          "conflicts_if_recolored_to_least_bad_adjacent_color": 54,
+          "least_bad_adjacent_color": 4,
+          "min_conflicts_over_all_real_colors": 54
+        },
+        {
+          "adjacent_real_colors": [
+            3
+          ],
+          "bonus_cell": [
+            5,
+            68
+          ],
+          "conflicts_if_recolored_to_least_bad_adjacent_color": 59,
+          "least_bad_adjacent_color": 3,
+          "min_conflicts_over_all_real_colors": 59
+        },
+        {
+          "adjacent_real_colors": [
+            2
+          ],
+          "bonus_cell": [
+            268,
+            197
+          ],
+          "conflicts_if_recolored_to_least_bad_adjacent_color": 40,
+          "least_bad_adjacent_color": 2,
+          "min_conflicts_over_all_real_colors": 23
+        },
+        {
+          "adjacent_real_colors": [
+            2
+          ],
+          "bonus_cell": [
+            224,
+            238
+          ],
+          "conflicts_if_recolored_to_least_bad_adjacent_color": 90,
+          "least_bad_adjacent_color": 2,
+          "min_conflicts_over_all_real_colors": 34
+        },
+        {
+          "adjacent_real_colors": [
+            4
+          ],
+          "bonus_cell": [
+            118,
+            114
+          ],
+          "conflicts_if_recolored_to_least_bad_adjacent_color": 43,
+          "least_bad_adjacent_color": 4,
+          "min_conflicts_over_all_real_colors": 43
+        }
+      ],
+      "one_step_bonus_repair_search": {
+        "candidate_bonus_cells": 28,
+        "examples": [
+          {
+            "blockers": 5,
+            "bonus": [
+              160,
+              95
+            ],
+            "reason": "some blocker has no zero-conflict alternate color",
+            "target": 4
+          },
+          {
+            "blockers": 8,
+            "bonus": [
+              224,
+              41
+            ],
+            "reason": "some blocker has no zero-conflict alternate color",
+            "target": 1
+          },
+          {
+            "blockers": 8,
+            "bonus": [
+              224,
+              44
+            ],
+            "reason": "some blocker has no zero-conflict alternate color",
+            "target": 1
+          },
+          {
+            "blockers": 8,
+            "bonus": [
+              299,
+              305
+            ],
+            "reason": "some blocker has no zero-conflict alternate color",
+            "target": 4
+          },
+          {
+            "blockers": 8,
+            "bonus": [
+              161,
+              95
+            ],
+            "reason": "some blocker has no zero-conflict alternate color",
+            "target": 4
+          }
+        ],
+        "found": false,
+        "rejection_reasons": {
+          "blocker_has_no_alt": 28,
+          "blocker_too_many": 0,
+          "mutual_alt_conflict_or_search_exhausted": 0
+        },
+        "tested_target_assignments": 28
+      },
+      "shape": [
+        389,
+        394
+      ],
+      "single_cell_recolor_safety": {
+        "bonus_cells": 5750,
+        "min_blockers_histogram_capped_20": {
+          "10": 23,
+          "11": 25,
+          "12": 19,
+          "13": 24,
+          "14": 33,
+          "15": 45,
+          "16": 36,
+          "17": 36,
+          "18": 34,
+          "19": 44,
+          "20+": 5386,
+          "5": 4,
+          "6": 5,
+          "7": 5,
+          "8": 14,
+          "9": 17
+        },
+        "min_blockers_mean": 83.71182608695652,
+        "min_blockers_median": 68.0,
+        "min_blockers_min": 5,
+        "safe_counts_by_color": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 0
+        },
+        "single_recolorable_bonus_cells": 0
+      }
+    }
+  ],
+  "seed": 1729,
+  "subdivisions": [
+    1945,
+    1970
+  ],
+  "v1": [
+    -0.17407057,
+    3.8842025
+  ],
+  "v2": [
+    -3.48389,
+    1.8401014
+  ]
+}
