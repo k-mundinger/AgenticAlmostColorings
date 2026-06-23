@@ -188,43 +188,57 @@ class GeneralUtility:
         return d
 
     @staticmethod
+    @torch.no_grad()
+    def get_parallelogram_coloring_metrics(
+        model: torch.nn.Module,
+        parallelogram: torch.Tensor,
+        gridsize: int,
+        n_circle_points: int,
+        n_colours: int,
+    ) -> dict[str, float]:
+        device = parallelogram.device
+        k, d = parallelogram.shape
+
+        lin = torch.linspace(0.0, 1.0, gridsize, device=device)
+        mesh = torch.meshgrid(*([lin] * k), indexing="ij")
+        coeffs = torch.stack([m.reshape(-1) for m in mesh], dim=-1)
+        points = coeffs.matmul(parallelogram)
+        grid_colours = model(points).argmax(dim=-1)
+
+        bonus_index = n_colours - 1
+        bonus_fraction = (grid_colours == bonus_index).float().mean().item()
+
+        offsets = GeneralUtility.sphere(n_circle_points, d=d, p=2).to(device)
+        conflicts = torch.zeros(points.size(0), device=device, dtype=torch.int32)
+        for off in offsets:
+            neigh_colours = model(points + off).argmax(dim=-1)
+            conflicts += (grid_colours == neigh_colours)
+
+        same_color_neighbor = conflicts > 0
+        real_color_mask = grid_colours < bonus_index
+        real_conflict_fraction = (real_color_mask & same_color_neighbor).float().mean().item()
+        bad_fraction = bonus_fraction + real_conflict_fraction
+
+        return {
+            "bonus_fraction": bonus_fraction,
+            "real_conflict_fraction": real_conflict_fraction,
+            "bad_fraction": bad_fraction,
+        }
+
+    @staticmethod
     def get_parallelogram_eval(model:torch.nn.Module,
                                parallelogram:torch.Tensor,
                                gridsize:int,
                                n_circle_points:int,
                                n_colours:int,):
-        
-        device = parallelogram.device
-        k, d = parallelogram.shape
-
-        # --- 1. build coefficient grid --------------------------------------------------------
-        lin = torch.linspace(0.0, 1.0, gridsize, device=device)
-        mesh = torch.meshgrid(*([lin] * k), indexing="ij")               # k tensors of shape (g,…,g)
-        coeffs = torch.stack([m.reshape(-1) for m in mesh], dim=-1)      # (G, k) where G = gridsize**k
-
-        # --- 2. map coefficients to ℝᵈ ---------------------------------------------------------
-        # points = coeffs @ parallelogram   →  (G, k) @ (k, d) = (G, d)
-        points = coeffs.matmul(parallelogram)
-
-        # --- 3. base colours ------------------------------------------------------------------
-        with torch.no_grad():
-            grid_colours = model(points).argmax(dim=-1)                  # (G,)
-
-        # --- 4. neighbour offsets on unit sphere ----------------------------------------------
-        offsets = GeneralUtility.sphere(n_circle_points, d=d, p=2).to(device)  # (S, d)
-
-        conflicts = torch.zeros(points.size(0), device=device, dtype=torch.int32)
-
-        # iterate over offsets (loop keeps memory footprint low; vectorisation is possible)
-        for off in offsets:
-            neigh_colours = model(points + off).argmax(dim=-1)           # (G,)
-            conflicts += (grid_colours == neigh_colours)
-
-        # --- 5. conflict logic ----------------------------------------------------------------
-        conflicted = conflicts > 0
-        conflicted |= (grid_colours == (n_colours - 1))                  # treat last colour as conflict
-
-        return conflicted.float().mean().item()
+        metrics = GeneralUtility.get_parallelogram_coloring_metrics(
+            model=model,
+            parallelogram=parallelogram,
+            gridsize=gridsize,
+            n_circle_points=n_circle_points,
+            n_colours=n_colours,
+        )
+        return metrics["bad_fraction"]
         
 
               

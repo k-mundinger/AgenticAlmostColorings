@@ -167,3 +167,62 @@ uv run python main.py --debug
 * [ ] Design an alternating optimization schedule (joint/alternating coordinate descent) for training the network and the parallelogram basis vectors in `runner.py`.
 * [ ] Experiment with dynamic/adaptive schedules for the Lagrange term `good_coloring_weight` to automate the tuning of the penalty weight.
 * [ ] Generalize/apply findings to 3D. Only start this if you are done with 2D completely.
+
+
+## Sweeping parallelograms
+
+Important: The loss is not really something we care about. It depends heavily on the `good_coloring_weight`. The metric we care about is `parallelogram_eval` which approximates the conflicts plus bonus color density. It is now wired into `train_batched_ensemble.py`.
+
+To find a good parallelogram, I started with a sweep over vector lengths and angles using this command:
+
+```
+PARAS=$(python -c 'import numpy as np,itertools as it
+specs=[]
+for r1,r2,t,p in it.product([2, 3, 4],[3, 4],np.linspace(0,np.pi,7,endpoint=False),np.deg2rad([30,90])):
+    a,c,d,b=np.round([r1*np.cos(t),r1*np.sin(t),r2*np.cos(t+p),r2*np.sin(t+p)],2)
+    specs.append(f"{a:g},{c:g};{d:g},{b:g}")
+print("|".join(specs))')
+
+uv run python scripts/train_batched_ensemble.py \
+  --ensemble-size 84 \
+  --parallelograms "$PARAS" \
+  --freeze-parallelogram \
+  --n-steps 10000 \
+  --output-root /scratch/htc/kradecki/para_ensemble_sweep
+```
+
+Note: The `--output-root` should be changed for the agentic setup to something the agent can work with.
+
+Not saying that this produces great results with these parameters, but it is a good starting point and it's more about the way to approach a search over parallelograms. At least we get something with roughly 10% "bad cells" (from the NN, as a proxy).
+
+```
+Best by eval: ensemble_1782227080_132410_m011_seed3000011_combo000_a-1.25_b-1.87_c1.56_d-2.35 bonus=8.8806% conflicts=0.7690% bad=9.6497%
+Saved 84 models to /scratch/htc/kradecki/para_ensemble_sweep/ensemble_1782227080_132410
+Best model: ensemble_1782227080_132410_m011_seed3000011_combo000_a-1.25_b-1.87_c1.56_d-2.35 bad_fraction=9.6497%
+Summary: /scratch/htc/kradecki/para_ensemble_sweep/ensemble_1782227080_132410/summary.csv
+```
+
+We could now do a finer grid around the best parallelogram found in the sweep and / or unfreeze it after some steps and play with the `good_coloring_weight` (for now done manually, this should definitely be scripted!):
+
+```
+BEST="1.25,1.87;1.56,-2.35"   # from the coarse sweep
+uv run python scripts/train_batched_ensemble.py \
+  --ensemble-size 5 \
+  --parallelograms "$BEST" \
+  --good-coloring-weights 0.001,0.005,0.01,0.05,0.1 \
+  --trainable-parallelogram-step 5000 \
+  --n-steps 20000 \
+  --output-root /scratch/htc/kradecki/para_refine_gw
+```
+
+Already better:
+
+```
+Best by eval: ensemble_1782227862_138762_m001_seed3000001_combo001_a1.25_b-2.35_c1.87_d1.56 bonus=7.5378% conflicts=0.0854% bad=7.6233%
+Saved 5 models to /scratch/htc/kradecki/para_refine_gw/ensemble_1782227862_138762
+Best model: ensemble_1782227862_138762_m001_seed3000001_combo001_a1.25_b-2.35_c1.87_d1.56 bad_fraction=7.6233%
+Summary: /scratch/htc/kradecki/para_refine_gw/ensemble_1782227862_138762/summary.csv
+```
+
+What I would suggest now is to try making the parallelogram trainable already in the first exploratory sweep, running this for a couple of radii and angles and see if we can find something good. lower bound for radius is 2 at least, upper bound maybe 6. Angles between 30 and 90 degrees should be fine, maybe also try between 10 and 170.
+

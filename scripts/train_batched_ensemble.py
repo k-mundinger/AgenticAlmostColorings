@@ -5,12 +5,21 @@ import itertools
 import json
 import math
 import os
+import sys
 import time
 from pathlib import Path
 
 import torch
 import torch.nn.functional as F
 from tqdm.auto import tqdm
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SCRIPTS_ROOT = Path(__file__).resolve().parent
+for path in (REPO_ROOT, SCRIPTS_ROOT):
+    if str(path) not in sys.path:
+        sys.path.append(str(path))
+
+from ensemble_eval import evaluate_run_dir
 
 
 def parse_csv_floats(raw: str) -> list[float]:
@@ -24,6 +33,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=2048)
     parser.add_argument("--n-circle-points", type=int, default=8)
     parser.add_argument("--loss-log-every", type=int, default=1000)
+    parser.add_argument("--eval-grid-size", type=int, default=128,
+                        help="Parallelogram grid size for post-train eval (matches runner val_grid_size).")
+    parser.add_argument("--eval-circle-points", type=int, default=128,
+                        help="Unit-sphere samples for conflict detection during eval.")
+    parser.add_argument("--skip-eval", action="store_true",
+                        help="Skip parallelogram coloring eval; summary will only contain training loss.")
     parser.add_argument("--output-root", type=Path, default=Path("/scratch/htc/npelleriti/agentic-almost-colorings/ensembles"))
     parser.add_argument("--sweep-id", default=None)
     parser.add_argument("--base-seed", type=int, default=3000000)
@@ -38,8 +53,41 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--grid-size", type=float, default=6.0)
     parser.add_argument("--grid-input-scale", type=float, default=1.0)
     parser.add_argument("--p-norm", type=float, default=2.0)
-    parser.add_argument("--parallelogram", default="2.0,1.0;1.0,2.0")
+    parser.add_argument("--parallelogram", default="2.0,1.0;1.0,2.0",
+                        help="Single parallelogram used when no sweep is configured.")
+    parser.add_argument(
+        "--parallelograms",
+        default=None,
+        help="Pipe-separated parallelogram specs, e.g. '2,1;1,2|1.5,0.5;0.5,1.5'.",
+    )
+    parser.add_argument(
+        "--parallelogram-a-values",
+        default=None,
+        help="Comma-separated top-left entries for a grid sweep over [[a,c],[d,b]].",
+    )
+    parser.add_argument(
+        "--parallelogram-b-values",
+        default=None,
+        help="Comma-separated bottom-right entries for a grid sweep over [[a,c],[d,b]].",
+    )
+    parser.add_argument(
+        "--parallelogram-c-values",
+        default=None,
+        help="Comma-separated top-right entries for a grid sweep over [[a,c],[d,b]].",
+    )
+    parser.add_argument(
+        "--parallelogram-d-values",
+        default=None,
+        help="Comma-separated bottom-left entries. Omit to tie d=c (symmetric off-diagonal).",
+    )
     parser.add_argument("--freeze-parallelogram", action="store_true")
+    parser.add_argument(
+        "--trainable-parallelogram-step",
+        type=int,
+        default=None,
+        help="Step at which the parallelogram basis starts training. "
+        "Default without --freeze-parallelogram: 1. With --freeze-parallelogram: never.",
+    )
 
     parser.add_argument("--n-hidden-layers", type=int, default=2)
     parser.add_argument("--n-hidden-units", type=int, default=64)
@@ -49,14 +97,104 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def parse_parallelogram(raw: str, device: torch.device) -> torch.Tensor:
+def parse_parallelogram_rows(raw: str) -> list[list[float]]:
     rows = []
     for row in raw.split(";"):
         rows.append([float(item.strip()) for item in row.split(",") if item.strip()])
-    tensor = torch.tensor(rows, dtype=torch.float32, device=device)
-    if tensor.shape != (2, 2):
-        raise ValueError(f"Expected a 2x2 parallelogram, got shape {tuple(tensor.shape)}")
-    return tensor
+    if len(rows) != 2 or any(len(row) != 2 for row in rows):
+        raise ValueError(f"Expected parallelogram 'x1,y1;x2,y2', got {raw!r}")
+    return rows
+
+
+def parse_parallelogram(raw: str, device: torch.device) -> torch.Tensor:
+    return torch.tensor(parse_parallelogram_rows(raw), dtype=torch.float32, device=device)
+
+
+def resolve_parallelogram_specs(args: argparse.Namespace) -> list[list[list[float]]]:
+    grid_args = (
+        args.parallelogram_a_values,
+        args.parallelogram_b_values,
+        args.parallelogram_c_values,
+    )
+    has_grid = any(value is not None for value in grid_args) or args.parallelogram_d_values is not None
+    if has_grid:
+        if not all(value is not None for value in grid_args):
+            raise ValueError(
+                "Grid sweep requires --parallelogram-a-values, --parallelogram-b-values, "
+                "and --parallelogram-c-values."
+            )
+        a_values = parse_csv_floats(args.parallelogram_a_values)
+        b_values = parse_csv_floats(args.parallelogram_b_values)
+        c_values = parse_csv_floats(args.parallelogram_c_values)
+        if args.parallelogram_d_values is not None:
+            d_values = parse_csv_floats(args.parallelogram_d_values)
+            return [[[a, c], [d, b]] for a, b, c, d in itertools.product(a_values, b_values, c_values, d_values)]
+        return [[[a, c], [c, b]] for a, b, c in itertools.product(a_values, b_values, c_values)]
+
+    if args.parallelograms:
+        specs = [spec.strip() for spec in args.parallelograms.split("|") if spec.strip()]
+        if not specs:
+            raise ValueError("--parallelograms was provided but no parallelogram specs were parsed.")
+        return [parse_parallelogram_rows(spec) for spec in specs]
+
+    return [parse_parallelogram_rows(args.parallelogram)]
+
+
+def format_parallelogram_tag(parallelogram: list[list[float]]) -> str:
+    a, c = parallelogram[0]
+    d, b = parallelogram[1]
+    return f"a{a:g}_b{b:g}_c{c:g}_d{d:g}"
+
+
+def parallelogram_determinant(parallelogram: list[list[float]]) -> float:
+    a, c = parallelogram[0]
+    d, b = parallelogram[1]
+    return a * b - c * d
+
+
+def is_invertible_parallelogram(parallelogram: list[list[float]], eps: float = 1e-8) -> bool:
+    return abs(parallelogram_determinant(parallelogram)) > eps
+
+
+def filter_invertible_parallelograms(
+    specs: list[list[list[float]]],
+) -> list[list[list[float]]]:
+    valid_specs = []
+    skipped = []
+    for spec in specs:
+        if is_invertible_parallelogram(spec):
+            valid_specs.append(spec)
+        else:
+            skipped.append(spec)
+
+    if skipped:
+        print(
+            f"Skipping {len(skipped)} singular parallelogram(s) "
+            f"(det=0, spanning vectors are parallel):",
+            flush=True,
+        )
+        for spec in skipped[:10]:
+            det = parallelogram_determinant(spec)
+            print(f"  {format_parallelogram_tag(spec)} det={det:g} matrix={spec}", flush=True)
+        if len(skipped) > 10:
+            print(f"  ... and {len(skipped) - 10} more", flush=True)
+
+    if not valid_specs:
+        raise ValueError(
+            "No invertible parallelograms remain after filtering. "
+            "Spanning vectors must not be parallel (require ab - cd != 0)."
+        )
+    return valid_specs
+
+
+def resolve_trainable_parallelogram_step(args: argparse.Namespace) -> int | None:
+    if args.trainable_parallelogram_step is not None:
+        if args.trainable_parallelogram_step < 1:
+            raise ValueError("--trainable-parallelogram-step must be >= 1")
+        return args.trainable_parallelogram_step
+    if args.freeze_parallelogram:
+        return None
+    return 1
 
 
 def activation_fn(name: str, x: torch.Tensor) -> torch.Tensor:
@@ -82,7 +220,7 @@ class BatchedResMLP(torch.nn.Module):
         activation: str,
         initialization: str,
         disable_residual_connections: bool,
-        parallelogram: torch.Tensor,
+        initial_parallelograms: torch.Tensor,
         trainable_parallelogram: bool,
         device: torch.device,
     ):
@@ -96,7 +234,12 @@ class BatchedResMLP(torch.nn.Module):
         self.initialization = initialization
         self.disable_residual_connections = disable_residual_connections
 
-        inv = torch.linalg.inv(parallelogram).expand(ensemble_size, -1, -1).clone()
+        if initial_parallelograms.shape != (ensemble_size, 2, 2):
+            raise ValueError(
+                f"Expected initial_parallelograms shape ({ensemble_size}, 2, 2), "
+                f"got {tuple(initial_parallelograms.shape)}"
+            )
+        inv = torch.linalg.inv(initial_parallelograms)
         self.inv_transf_matrix = torch.nn.Parameter(inv, requires_grad=trainable_parallelogram)
 
         self.input_weight = torch.nn.Parameter(torch.empty(ensemble_size, n_hidden_units, input_dim, device=device))
@@ -265,6 +408,7 @@ def build_config(
     good_coloring_weight: float,
     temperature: float,
     parallelogram: list[list[float]],
+    trainable_parallelogram_step: int | None,
 ) -> dict:
     return {
         "run_id": 1,
@@ -289,7 +433,7 @@ def build_config(
             "good_coloring": True,
             "good_coloring_weight": good_coloring_weight,
             "parallelogram": parallelogram,
-            "trainable_parallelogram": 0 if args.freeze_parallelogram else 1,
+            "trainable_parallelogram": 0 if trainable_parallelogram_step is None else trainable_parallelogram_step,
         },
         "model": {
             "name": "ResMLP",
@@ -342,14 +486,22 @@ def main() -> int:
     if not combos:
         raise ValueError("At least one hyperparameter combination is required.")
 
+    parallelogram_specs = filter_invertible_parallelograms(resolve_parallelogram_specs(args))
+    trainable_parallelogram_step = resolve_trainable_parallelogram_step(args)
+
     seeds = torch.arange(args.base_seed, args.base_seed + args.ensemble_size, dtype=torch.long)
     combo_indices = [idx % len(combos) for idx in range(args.ensemble_size)]
+    parallelogram_indices = [idx % len(parallelogram_specs) for idx in range(args.ensemble_size)]
     learning_rates = torch.tensor([combos[idx][0] for idx in combo_indices], dtype=torch.float32, device=device)
     weight_decays = torch.tensor([combos[idx][1] for idx in combo_indices], dtype=torch.float32, device=device)
     good_weights = torch.tensor([combos[idx][2] for idx in combo_indices], dtype=torch.float32, device=device)
     temperatures = torch.tensor([combos[idx][3] for idx in combo_indices], dtype=torch.float32, device=device)
 
-    parallelogram = parse_parallelogram(args.parallelogram, device=device)
+    initial_parallelograms = torch.tensor(
+        [parallelogram_specs[idx] for idx in parallelogram_indices],
+        dtype=torch.float32,
+        device=device,
+    )
     model = BatchedResMLP(
         ensemble_size=args.ensemble_size,
         input_dim=args.dim,
@@ -359,8 +511,8 @@ def main() -> int:
         activation=args.activation,
         initialization=args.initialization,
         disable_residual_connections=not args.enable_residual_connections,
-        parallelogram=parallelogram,
-        trainable_parallelogram=not args.freeze_parallelogram,
+        initial_parallelograms=initial_parallelograms,
+        trainable_parallelogram=trainable_parallelogram_step == 1,
         device=device,
     )
 
@@ -377,7 +529,9 @@ def main() -> int:
     loss_files = []
     for idx in range(args.ensemble_size):
         combo_idx = combo_indices[idx]
-        run_id = f"{sweep_id}_m{idx:03d}_seed{int(seeds[idx])}_combo{combo_idx:03d}"
+        para_idx = parallelogram_indices[idx]
+        para_tag = format_parallelogram_tag(parallelogram_specs[para_idx])
+        run_id = f"{sweep_id}_m{idx:03d}_seed{int(seeds[idx])}_combo{combo_idx:03d}_{para_tag}"
         run_dir = sweep_root / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
         run_dirs.append(run_dir)
@@ -393,6 +547,8 @@ def main() -> int:
                     "model_index": idx,
                     "seed": int(seeds[idx]),
                     "combo_index": combo_idx,
+                    "parallelogram_index": para_idx,
+                    "initial_parallelogram": parallelogram_specs[para_idx],
                     "learning_rate": lr,
                     "weight_decay": wd,
                     "good_coloring_weight": gw,
@@ -404,12 +560,27 @@ def main() -> int:
 
     print(
         f"Training ensemble_size={args.ensemble_size} on {device} for {args.n_steps} steps; "
-        f"{len(combos)} hyperparameter combos; output={sweep_root}",
+        f"{len(combos)} hyperparameter combos; {len(parallelogram_specs)} parallelograms; "
+        f"parallelogram_trainable_from_step={trainable_parallelogram_step or 'never'}; "
+        f"output={sweep_root}",
         flush=True,
     )
 
     try:
         for step in tqdm(range(1, args.n_steps + 1)):
+            if (
+                trainable_parallelogram_step is not None
+                and step == trainable_parallelogram_step
+                and not model.inv_transf_matrix.requires_grad
+            ):
+                model.inv_transf_matrix.requires_grad = True
+                params = [param for param in model.parameters() if param.requires_grad]
+                print(
+                    f"Unfroze parallelogram basis at step {step}; "
+                    f"now optimizing {len(params)} parameter tensors.",
+                    flush=True,
+                )
+
             anchor = (2.0 * bounds * torch.rand(args.ensemble_size, args.batch_size, args.dim, device=device)) - bounds
             unit = sphere((args.ensemble_size, args.n_circle_points), args.dim, args.p_norm, device)
             proximity = anchor[:, :, None, :] + unit[:, None, :, :]
@@ -452,6 +623,9 @@ def main() -> int:
             inv_transf_matrix = model.inv_transf_matrix[idx].detach().cpu()
         torch.save(state_dict, run_dir / "trained_model.pt")
         lr, wd, gw, temp = combos[combo_indices[idx]]
+        para_idx = parallelogram_indices[idx]
+        initial_parallelogram = parallelogram_specs[para_idx]
+        final_parallelogram = torch.linalg.inv(inv_transf_matrix).tolist()
         config = build_config(
             args=args,
             seed=int(seeds[idx]),
@@ -459,29 +633,61 @@ def main() -> int:
             weight_decay=wd,
             good_coloring_weight=gw,
             temperature=temp,
-            parallelogram=torch.linalg.inv(inv_transf_matrix).tolist(),
+            parallelogram=final_parallelogram,
+            trainable_parallelogram_step=trainable_parallelogram_step,
         )
         with (run_dir / "pipeline_config.json").open("w", encoding="utf-8") as f:
             json.dump(config, f, indent=2)
-        summary_rows.append(
-            {
-                "run_id": run_dir.name,
-                "model_index": idx,
-                "seed": int(seeds[idx]),
-                "combo_index": combo_indices[idx],
-                "learning_rate": lr,
-                "weight_decay": wd,
-                "good_coloring_weight": gw,
-                "temperature": temp,
-                "best_step": int(best_steps[idx].cpu()),
-                "best_loss": float(best_losses[idx].cpu()),
-                "final_step": args.n_steps,
-                "final_loss": float(final_losses[idx].cpu()),
-                "run_dir": str(run_dir),
-            }
-        )
 
-    summary_rows.sort(key=lambda row: (row["best_loss"], row["run_id"]))
+        row = {
+            "run_id": run_dir.name,
+            "model_index": idx,
+            "seed": int(seeds[idx]),
+            "combo_index": combo_indices[idx],
+            "parallelogram_index": para_idx,
+            "initial_parallelogram": json.dumps(initial_parallelogram),
+            "final_parallelogram": json.dumps(final_parallelogram),
+            "learning_rate": lr,
+            "weight_decay": wd,
+            "good_coloring_weight": gw,
+            "temperature": temp,
+            "best_step": int(best_steps[idx].cpu()),
+            "best_loss": float(best_losses[idx].cpu()),
+            "final_step": args.n_steps,
+            "final_loss": float(final_losses[idx].cpu()),
+            "run_dir": str(run_dir),
+        }
+
+        if not args.skip_eval:
+            eval_metrics = evaluate_run_dir(
+                run_dir=run_dir,
+                eval_grid_size=args.eval_grid_size,
+                eval_circle_points=args.eval_circle_points,
+                device=device,
+            )
+            row.update(eval_metrics)
+
+        summary_rows.append(row)
+
+    if summary_rows and not args.skip_eval:
+        summary_rows.sort(
+            key=lambda row: (
+                row.get("bad_fraction_pct", float("inf")),
+                row.get("bonus_fraction_pct", float("inf")),
+                row.get("real_conflict_fraction_pct", float("inf")),
+                row["run_id"],
+            )
+        )
+        best = summary_rows[0]
+        print(
+            f"Best by eval: {best['run_id']} "
+            f"bonus={best['bonus_fraction_pct']:.4f}% "
+            f"conflicts={best['real_conflict_fraction_pct']:.4f}% "
+            f"bad={best['bad_fraction_pct']:.4f}%",
+            flush=True,
+        )
+    else:
+        summary_rows.sort(key=lambda row: (row["best_loss"], row["run_id"]))
     summary_path = sweep_root / "summary.csv"
     with summary_path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(summary_rows[0].keys()))
@@ -489,7 +695,13 @@ def main() -> int:
         writer.writerows(summary_rows)
 
     print(f"Saved {args.ensemble_size} models to {sweep_root}")
-    print(f"Best model: {summary_rows[0]['run_id']} best_loss={summary_rows[0]['best_loss']:.8f}")
+    if summary_rows and not args.skip_eval:
+        print(
+            f"Best model: {summary_rows[0]['run_id']} "
+            f"bad_fraction={summary_rows[0]['bad_fraction_pct']:.4f}%"
+        )
+    elif summary_rows:
+        print(f"Best model: {summary_rows[0]['run_id']} best_loss={summary_rows[0]['best_loss']:.8f}")
     print(f"Summary: {summary_path}")
     return 0
 
