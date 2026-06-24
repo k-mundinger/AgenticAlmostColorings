@@ -1,0 +1,31 @@
+{
+  "source_npz": "constructions/frontier_post142342_1945x1970/verification/fixed_coloring_1945x1970_frontier_post142342.npz",
+  "source_parallelogram": "constructions/frontier_post142342_1945x1970/parallelogram.csv",
+  "grid_shape": [
+    1945,
+    1970
+  ],
+  "color_counts": {
+    "0": 787829,
+    "1": 657248,
+    "2": 788719,
+    "3": 832435,
+    "4": 623077,
+    "5": 142342
+  },
+  "bonus_color": 5,
+  "bonus_fraction_percent": 3.714900891260945,
+  "parallelogram_downsample_step": 2,
+  "outputs": [
+    "visualizations/frontier_post142342_1945x1970_bonus_mask.pdf",
+    "visualizations/frontier_post142342_1945x1970_bonus_mask.png",
+    "visualizations/frontier_post142342_1945x1970_bonus_mask.svg",
+    "visualizations/frontier_post142342_1945x1970_parallelogram.pdf",
+    "visualizations/frontier_post142342_1945x1970_parallelogram.png",
+    "visualizations/frontier_post142342_1945x1970_parallelogram.svg",
+    "visualizations/frontier_post142342_1945x1970_square.pdf",
+    "visualizations/frontier_post142342_1945x1970_square.png",
+    "visualizations/frontier_post142342_1945x1970_square.svg",
+    "visualizations/frontier_post142342_1945x1970_visualization_summary.json"
+  ]
+}

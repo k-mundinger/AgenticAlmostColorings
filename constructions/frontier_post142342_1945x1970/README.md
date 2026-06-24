@@ -33,6 +33,14 @@ in round 20 by Agent 1.
   the candidate package.
 - `verification/frontier_post142342_count_table.csv`: final color counts.
 - `agent_run/report.md`: Agent 1's round 20 report explaining the search.
+- `visualizations/frontier_post142342_1945x1970_square.{pdf,png,svg}`:
+  square-grid view of the final coloring.
+- `visualizations/frontier_post142342_1945x1970_bonus_mask.{pdf,png,svg}`:
+  mask of the final bonus-color cells.
+- `visualizations/frontier_post142342_1945x1970_parallelogram.{pdf,png,svg}`:
+  downsampled view embedded in the paper parallelogram.
+- `visualizations/frontier_post142342_1945x1970_visualization_summary.json`:
+  plot provenance, final color counts, and display downsampling metadata.
 
 Load the patched coloring with:
 
