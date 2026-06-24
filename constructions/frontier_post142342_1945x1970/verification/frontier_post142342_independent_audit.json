@@ -1,0 +1,56 @@
+{
+  "audit_pass": true,
+  "base_diff": "/scratch/htc/npelleriti/pi-sandbox/incumbent-frontier-ilp-loop/job_1339449/round_19/agent_1/experiments/post142347_onecopy/combined_candidates/t10_rank66_plus_t10_rank78/combined_post142347_t10_rank66_t10_rank78_candidate_vs_paper.csv",
+  "base_old_value_mismatch_count": 0,
+  "candidate_diff": "/scratch/htc/npelleriti/pi-sandbox/incumbent-frontier-ilp-loop/job_1339449/round_20/agent_1/experiments/post142344_onecopy/combined_candidates/t10_rank49_plus_t12_rank65/combined_post142344_t10_rank49_t12_rank65_candidate_vs_paper.csv",
+  "candidate_sha256": "71a86e29e95f739cedce70b696b8646f48f376294adcac10786f821b6ff3d804",
+  "color5_count": 142342,
+  "color_counts": {
+    "0": 787829,
+    "1": 657248,
+    "2": 788719,
+    "3": 832435,
+    "4": 623077,
+    "5": 142342
+  },
+  "combined_full_incremental_mismatch_count": 0,
+  "combined_full_incremental_mismatch_sample": [],
+  "combined_incremental_duplicate_count": 0,
+  "combined_incremental_new_value_mismatch_count": 0,
+  "combined_incremental_old_value_mismatch_count": 0,
+  "combined_incremental_rows": 31,
+  "count_table": "/scratch/htc/npelleriti/pi-sandbox/incumbent-frontier-ilp-loop/job_1339449/round_20/agent_1/experiments/post142344_onecopy/combined_candidates/t10_rank49_plus_t12_rank65/combined_post142344_t10_rank49_t12_rank65_count_table.csv",
+  "directed_conflicts_by_color": {
+    "0": 0,
+    "1": 0,
+    "2": 0,
+    "3": 0,
+    "4": 0
+  },
+  "directed_conflicts_total": 0,
+  "elapsed_seconds": 24.388,
+  "incremental_sha256": "183d8b33a44aa91eb559517a9dbc1c34df19b21c694dc2d550ea90a6f8f77592",
+  "incremental_vs_base": "/scratch/htc/npelleriti/pi-sandbox/incumbent-frontier-ilp-loop/job_1339449/round_20/agent_1/experiments/post142344_onecopy/combined_candidates/t10_rank49_plus_t12_rank65/combined_post142344_t10_rank49_t12_rank65_incremental_vs_post142344_combined_r19.csv",
+  "max_rss_kb": 660016,
+  "name": "combined_post142344_t10_rank49_t12_rank65",
+  "old_value_duplicate_overlap_checks_pass": true,
+  "source_coordinate_overlap_count": 0,
+  "source_duplicate_counts": [
+    0,
+    0
+  ],
+  "source_incremental_rows": [
+    9,
+    22
+  ],
+  "source_incremental_sha256": [
+    "494fa4f5d72847143066428d86bd9b730e97e3c35aed88212d782fb7d94abda2",
+    "52609d0f3efd78792268a0642cd98fd8bd7f94c26b64926a05577d91d29803ad"
+  ],
+  "source_incrementals": [
+    "/scratch/htc/npelleriti/pi-sandbox/incumbent-frontier-ilp-loop/job_1339449/round_20/agent_1/experiments/post142344_onecopy/solves_focused/t10_rank49/post142344_t10_rank49_nosplit_cut1_r20_incremental_vs_post142344_combined_r19.csv",
+    "/scratch/htc/npelleriti/pi-sandbox/incumbent-frontier-ilp-loop/job_1339449/round_20/agent_1/experiments/post142344_onecopy/solves_focused/t12_rank65/post142344_t12_rank65_nosplit_cut1_r20_incremental_vs_post142344_combined_r19.csv"
+  ],
+  "source_old_value_mismatch_count": 0,
+  "zero_directed_conflicts": true
+}
